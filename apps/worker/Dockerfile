@@ -1,29 +1,18 @@
-FROM node:20-alpine AS builder
-
+FROM node:20-slim AS builder
 WORKDIR /app
-
-RUN apk add --no-cache openssl
-
+RUN apt-get update && apt-get install -y openssl --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
-
 RUN npm ci
-
 COPY . .
-
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:20-alpine
-
+FROM node:20-slim
 WORKDIR /app
-
-RUN apk add --no-cache dumb-init openssl
-
+RUN apt-get update && apt-get install -y openssl dumb-init --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 COPY package*.json ./
-
 ENTRYPOINT ["dumb-init", "--"]
-
 CMD ["node", "dist/index.js"]
