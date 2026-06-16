@@ -1,29 +1,19 @@
 FROM node:20-alpine AS builder
-
 WORKDIR /app
-
 RUN apk add --no-cache openssl
-
 COPY package*.json ./
-
 RUN npm ci
-
 COPY . .
-
 RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-alpine
-
 WORKDIR /app
-
-RUN apk add --no-cache dumb-init openssl
-
+RUN apk add --no-cache dumb-init openssl1.1-compat
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 COPY package*.json ./
-
+EXPOSE 3001
 ENTRYPOINT ["dumb-init", "--"]
-
-CMD ["node", "dist/index.js"]
+CMD sh -c "until npx prisma db push --accept-data-loss; do echo 'Aguardando banco...'; sleep 5; done && node dist/index.js"
