@@ -15,4 +15,4 @@ COPY --from=builder /app/prisma ./prisma
 COPY package*.json ./
 EXPOSE 3001
 ENTRYPOINT ["dumb-init", "--"]
-CMD sh -c "npx prisma db push --accept-data-loss && node dist/index.js"
+CMD sh -c "until npx prisma db push --accept-data-loss; do echo 'DB not ready, retrying in 5s...'; sleep 5; done && node dist/index.js"

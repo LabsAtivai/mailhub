@@ -10,10 +10,11 @@ services:
     volumes:
       - mailhub_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mailhub"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U mailhub -d mailhub"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
     networks:
       - ativaai
 
@@ -26,9 +27,10 @@ services:
       - mailhub_redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
     networks:
       - ativaai
 
@@ -76,8 +78,6 @@ services:
     restart: unless-stopped
     depends_on:
       - mailhub-backend
-    volumes:
-      - /opt/mailhub/config/mailhub-nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - ativaai
 
