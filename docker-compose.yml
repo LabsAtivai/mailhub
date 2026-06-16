@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mailhub
+      POSTGRES_USER: mailhub
+      POSTGRES_PASSWORD: mailhub
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # 5433 no host para não conflitar com Postgres local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"   # 6380 no host para não conflitar com Redis local
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  backend:
+    build:
+      context: ./mailhub-backend
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://mailhub:mailhub@postgres:5432/mailhub
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-prod}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-36d99276a1a97d6b459a18117a55819035f1721b2116e50349ccb8de6e6238a6}
+      CORS_ORIGIN: http://localhost:5173
+      PORT: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "npx prisma db push --accept-data-loss && npm run start"
+    profiles: ["full"]
+
+  worker:
+    build:
+      context: ./mailhub-worker
+    environment:
+      DATABASE_URL: postgresql://mailhub:mailhub@postgres:5432/mailhub
+      REDIS_URL: redis://redis:6379
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-36d99276a1a97d6b459a18117a55819035f1721b2116e50349ccb8de6e6238a6}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["full"]
+
+  frontend:
+    build:
+      context: ./mailhub-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    profiles: ["full"]
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: mailhub-dev

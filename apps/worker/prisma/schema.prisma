@@ -1,0 +1,135 @@
+// GERADO AUTOMATICAMENTE - fonte de verdade: mailhub-backend/prisma/schema.prisma
+// Nao edite aqui. Rode: npm run schema:sync
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  accounts     MailAccount[]
+  refreshTokens RefreshToken[]
+  labels       Label[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model MailAccount {
+  id                String    @id @default(uuid())
+  userId            String
+  displayName       String
+  emailAddress      String
+  incomingHost      String
+  incomingPort      Int       @default(993)
+  outgoingHost      String
+  outgoingPort      Int       @default(465)
+  username          String
+  encryptedPassword String
+  tlsMode           String    @default("TLS")
+  syncEnabled       Boolean   @default(true)
+  syncState         String    @default("PENDING")
+  lastSyncAt        DateTime?
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folders           Folder[]
+}
+
+model Folder {
+  id            String      @id @default(uuid())
+  accountId     String
+  path          String
+  name          String
+  specialUse    String?
+  uidValidity   BigInt?
+  uidNext       BigInt?
+  highestModSeq BigInt?
+  unreadCount   Int         @default(0)
+  totalMessages Int         @default(0)
+  account       MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  @@unique([accountId, path])
+}
+
+model Message {
+  id             String         @id @default(uuid())
+  accountId      String
+  folderId       String
+  uid            BigInt
+  messageId      String?
+  inReplyTo      String?
+  subject        String?
+  preview        String?
+  fromName       String?
+  fromEmail      String?
+  toJson         String         @default("[]")
+  ccJson         String?
+  date           DateTime
+  hasAttachments Boolean        @default(false)
+  isRead         Boolean        @default(false)
+  isFlagged      Boolean        @default(false)
+  isAnswered     Boolean        @default(false)
+  htmlBody       String?
+  textBody       String?
+  bodyFetchedAt  DateTime?
+  size           Int?
+  createdAt      DateTime       @default(now())
+  folder         Folder         @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  attachments    Attachment[]
+  labels         MessageLabel[]
+
+  @@unique([accountId, folderId, uid])
+  @@index([folderId, date(sort: Desc)])
+  @@index([accountId, messageId])
+  @@index([accountId, isRead])
+  @@index([accountId, isFlagged])
+  @@index([accountId, date(sort: Desc)])
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  messageId  String
+  filename   String
+  mimeType   String
+  size       Int
+  contentId  String?
+  isInline   Boolean  @default(false)
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model Label {
+  id        String         @id @default(uuid())
+  userId    String
+  name      String
+  color     String         @default("#6366f1")
+  createdAt DateTime       @default(now())
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  MessageLabel[]
+  @@unique([userId, name])
+}
+
+model MessageLabel {
+  messageId  String
+  labelId    String
+  assignedAt DateTime @default(now())
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  label      Label    @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  @@id([messageId, labelId])
+  @@index([labelId])
+}

@@ -1,0 +1,109 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  ORG: labsativai
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend:  ${{ steps.filter.outputs.backend }}
+      worker:   ${{ steps.filter.outputs.worker }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'apps/backend/**'
+              - '.github/workflows/deploy.yml'
+            worker:
+              - 'apps/worker/**'
+              - '.github/workflows/deploy.yml'
+            frontend:
+              - 'apps/frontend/**'
+              - '.github/workflows/deploy.yml'
+
+  build-backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: apps/backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-backend:latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-backend:${{ github.sha }}
+      - name: Trigger Portainer
+        run: curl -s -X POST "${{ secrets.PORTAINER_WEBHOOK_BACKEND }}"
+        continue-on-error: true
+
+  build-worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: apps/worker
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-worker:latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-worker:${{ github.sha }}
+      - name: Trigger Portainer
+        run: curl -s -X POST "${{ secrets.PORTAINER_WEBHOOK_WORKER }}"
+        continue-on-error: true
+
+  build-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: apps/frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-frontend:latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-frontend:${{ github.sha }}
+          build-args: |
+            VITE_API_URL=https://mailhub.labsativa.com.br
+      - name: Trigger Portainer
+        run: curl -s -X POST "${{ secrets.PORTAINER_WEBHOOK_FRONTEND }}"
+        continue-on-error: true
