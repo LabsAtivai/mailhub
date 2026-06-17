@@ -10,6 +10,20 @@ export interface Label {
   createdAt: string
 }
 
+function toLabel(raw: any): Label {
+  return {
+    id: raw.id,
+    name: raw.name,
+    color: raw.color,
+    messageCount: raw.messageCount ?? raw._count?.messages ?? 0,
+    createdAt: raw.createdAt,
+  }
+}
+
+function sortLabels(arr: Label[]): Label[] {
+  return [...arr].sort((a, b) => a.name.localeCompare(b.name))
+}
+
 export const useLabelStore = defineStore('labels', () => {
   const labels = ref<Label[]>([])
   const loading = ref(false)
@@ -18,7 +32,9 @@ export const useLabelStore = defineStore('labels', () => {
     loading.value = true
     try {
       const { data } = await api.get('/labels')
-      labels.value = data
+      if (Array.isArray(data)) {
+        labels.value = sortLabels(data.map(toLabel))
+      }
     } finally {
       loading.value = false
     }
@@ -26,13 +42,16 @@ export const useLabelStore = defineStore('labels', () => {
 
   async function createLabel(name: string, color: string): Promise<Label> {
     const { data } = await api.post('/labels', { name, color })
-    await fetchLabels()
-    return labels.value.find(l => l.id === data.id) ?? data
+    const created = toLabel(data)
+    labels.value = sortLabels([...labels.value.filter(l => l.id !== created.id), created])
+    return created
   }
 
   async function updateLabel(id: string, name: string, color: string): Promise<void> {
-    await api.patch(`/labels/${id}`, { name, color })
-    await fetchLabels()
+    const { data } = await api.patch(`/labels/${id}`, { name, color })
+    labels.value = sortLabels(
+      labels.value.map(l => l.id === id ? { ...l, ...toLabel(data) } : l)
+    )
   }
 
   async function deleteLabel(id: string): Promise<void> {
@@ -42,13 +61,20 @@ export const useLabelStore = defineStore('labels', () => {
 
   async function assignLabel(messageId: string, labelId: string): Promise<Label[]> {
     const { data } = await api.post(`/messages/${messageId}/labels`, { labelId })
-    await fetchLabels()
+    const l = labels.value.find(x => x.id === labelId)
+    if (l) {
+      labels.value = labels.value.map(x =>
+        x.id === labelId ? { ...x, messageCount: x.messageCount + 1 } : x
+      )
+    }
     return data
   }
 
   async function removeLabel(messageId: string, labelId: string): Promise<Label[]> {
     const { data } = await api.delete(`/messages/${messageId}/labels/${labelId}`)
-    await fetchLabels()
+    labels.value = labels.value.map(x =>
+      x.id === labelId ? { ...x, messageCount: Math.max(0, x.messageCount - 1) } : x
+    )
     return data
   }
 

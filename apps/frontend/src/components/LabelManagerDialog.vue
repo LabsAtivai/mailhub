@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive } from 'vue'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
@@ -99,8 +99,6 @@ const form = reactive({ name: '', color: '#F47A20' })
 const editing = ref<Label | null>(null)
 const submitting = ref(false)
 const formError = ref('')
-
-onMounted(() => labelStore.fetchLabels())
 
 function startEdit(label: Label) {
   editing.value = label
