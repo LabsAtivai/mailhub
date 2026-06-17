@@ -104,23 +104,36 @@ async function handleDelete(payload: any) {
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId }))
 }
 
+// ── concurrency-limited sync runner ─────────────────────────────────────────
+async function runWithConcurrency(
+  ids: string[],
+  concurrency: number,
+  label: string,
+): Promise<void> {
+  const queue = [...ids]
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const id = queue.shift()!
+      await syncAccount(id).catch(e =>
+        logger.error({ accountId: id, err: e.message }, `${label} sync failed`))
+    }
+  })
+  await Promise.all(workers)
+}
+
 // ── periodic incremental sync every 2 minutes ───────────────────────────────
 setInterval(async () => {
   const accounts = await prisma.mailAccount.findMany({
     where: { syncEnabled: true, syncState: { not: 'SYNCING' } },
     select: { id: true }
   })
-  for (const acc of accounts) {
-    syncAccount(acc.id).catch(e => logger.error({ accountId: acc.id, err: e.message }, 'boot sync failed'))
-  }
+  runWithConcurrency(accounts.map(a => a.id), 10, 'periodic').catch(() => {})
 }, 2 * 60 * 1000)
 
 // ── boot: sync all accounts + start IDLE watchers ───────────────────────────
 prisma.mailAccount.findMany({ where: { syncEnabled: true }, select: { id: true } }).then(accounts => {
   logger.info({ count: accounts.length }, 'accounts to sync on boot')
-  for (const acc of accounts) {
-    syncAccount(acc.id).catch(e => logger.error({ accountId: acc.id, err: e.message }, 'boot sync failed'))
-  }
+  runWithConcurrency(accounts.map(a => a.id), 10, 'boot').catch(() => {})
 })
 
 process.on('SIGTERM', async () => {
