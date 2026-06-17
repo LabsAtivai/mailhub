@@ -69,6 +69,7 @@ services:
       REDIS_URL: ${REDIS_URL}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       NODE_ENV: ${NODE_ENV}
+      IMAP_PROXY_URL: ${IMAP_PROXY_URL:-}
     networks:
       - ativaai
 

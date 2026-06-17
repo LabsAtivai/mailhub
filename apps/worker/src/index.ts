@@ -6,6 +6,7 @@ import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 
 logger.info('starting mailhub-worker')
+if (process.env.IMAP_PROXY_URL) logger.info({ proxy: process.env.IMAP_PROXY_URL }, 'IMAP proxy configured')
 
 const sub = redis.duplicate()
 

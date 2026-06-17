@@ -11,13 +11,17 @@ const log = scope('sync')
 const SYNC_DAYS = 90
 const BATCH_SIZE = 200 // fetch envelope UIDs in chunks
 
+const IMAP_PROXY = process.env.IMAP_PROXY_URL || ''
+
 function imapOptions(account: any) {
-  return {
+  const opts: Record<string, any> = {
     host: account.incomingHost,
     port: account.incomingPort,
     secure: account.tlsMode === 'TLS',
     auth: { user: account.username, pass: decrypt(account.encryptedPassword) },
   }
+  if (IMAP_PROXY) opts.proxy = IMAP_PROXY
+  return opts
 }
 
 export async function getOpsClient(accountId: string): Promise<ImapFlow> {
