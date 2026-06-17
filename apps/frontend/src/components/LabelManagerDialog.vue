@@ -112,7 +112,7 @@ function startEdit(label: Label) {
 function cancelEdit() {
   editing.value = null
   form.name = ''
-  form.color = '#6366f1'
+  form.color = '#F47A20'
   formError.value = ''
 }
 

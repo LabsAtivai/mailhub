@@ -117,7 +117,7 @@ model Label {
   id        String         @id @default(uuid())
   userId    String
   name      String
-  color     String         @default("#6366f1")
+  color     String         @default("#F47A20")
   createdAt DateTime       @default(now())
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  MessageLabel[]

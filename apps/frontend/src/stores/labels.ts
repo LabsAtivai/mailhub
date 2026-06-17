@@ -25,9 +25,9 @@ export const useLabelStore = defineStore('labels', () => {
   }
 
   async function createLabel(name: string, color: string): Promise<Label> {
-    await api.post('/labels', { name, color })
+    const { data } = await api.post('/labels', { name, color })
     await fetchLabels()
-    return labels.value[labels.value.length - 1]
+    return labels.value.find(l => l.id === data.id) ?? data
   }
 
   async function updateLabel(id: string, name: string, color: string): Promise<void> {
