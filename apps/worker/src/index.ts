@@ -130,8 +130,14 @@ setInterval(async () => {
   runWithConcurrency(accounts.map(a => a.id), 10, 'periodic').catch(() => {})
 }, 2 * 60 * 1000)
 
-// ── boot: sync all accounts + start IDLE watchers ───────────────────────────
-prisma.mailAccount.findMany({ where: { syncEnabled: true }, select: { id: true } }).then(accounts => {
+// ── boot: reset stale SYNCING states + sync all accounts ────────────────────
+prisma.mailAccount.updateMany({
+  where: { syncState: 'SYNCING' },
+  data: { syncState: 'IDLE' },
+}).then(({ count }) => {
+  if (count > 0) logger.info({ count }, 'reset stale SYNCING accounts')
+  return prisma.mailAccount.findMany({ where: { syncEnabled: true }, select: { id: true } })
+}).then(accounts => {
   logger.info({ count: accounts.length }, 'accounts to sync on boot')
   runWithConcurrency(accounts.map(a => a.id), 10, 'boot')
     .then(() => logger.info('boot sync finished'))
