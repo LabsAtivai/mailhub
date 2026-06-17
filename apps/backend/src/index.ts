@@ -28,6 +28,9 @@ app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }))
 app.use(express.json({ limit: '26mb' }))
 app.use(cookieParser())
 
+// ── healthcheck (antes das rotas autenticadas) ──────────────────────────────
+app.get('/health', (_req, res) => res.json({ ok: true }))
+
 // ── routes ──────────────────────────────────────────────────────────────────
 app.use('/auth', authRoutes)
 app.use('/accounts', accountRoutes)
@@ -78,9 +81,6 @@ redisSub.on('message', (channel: string, message: string) => {
     }
   } catch { /* ignore malformed */ }
 })
-
-// ── healthcheck ─────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ ok: true }))
 
 const PORT = process.env.PORT || 3001
 server.listen(PORT, () => logger.info({ port: PORT }, 'mailhub-backend listening'))
