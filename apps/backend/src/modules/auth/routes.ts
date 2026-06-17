@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import bcrypt from 'bcryptjs'
+import argon2 from 'argon2'
 import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import { signAccess, signRefresh, verifyRefresh } from '../../lib/jwt'
@@ -27,7 +27,12 @@ router.post('/register', async (req: Request, res: Response) => {
   const existing = await prisma.user.findUnique({ where: { email } })
   if (existing) { res.status(409).json({ error: 'Email already in use' }); return }
 
-  const passwordHash = await bcrypt.hash(password, 12)
+  const passwordHash = await argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: 65536,
+    timeCost: 3,
+    parallelism: 1,
+  })
   const user = await prisma.user.create({ data: { name, email, passwordHash } })
 
   const access = signAccess({ userId: user.id, email: user.email })
@@ -47,7 +52,7 @@ router.post('/login', async (req: Request, res: Response) => {
   const user = await prisma.user.findUnique({ where: { email } })
   if (!user) { res.status(401).json({ error: 'Invalid credentials' }); return }
 
-  const valid = await bcrypt.compare(password, user.passwordHash)
+  const valid = await argon2.verify(user.passwordHash, password)
   if (!valid) { res.status(401).json({ error: 'Invalid credentials' }); return }
 
   const access = signAccess({ userId: user.id, email: user.email })
