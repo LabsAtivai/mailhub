@@ -133,7 +133,9 @@ setInterval(async () => {
 // ── boot: sync all accounts + start IDLE watchers ───────────────────────────
 prisma.mailAccount.findMany({ where: { syncEnabled: true }, select: { id: true } }).then(accounts => {
   logger.info({ count: accounts.length }, 'accounts to sync on boot')
-  runWithConcurrency(accounts.map(a => a.id), 10, 'boot').catch(() => {})
+  runWithConcurrency(accounts.map(a => a.id), 10, 'boot')
+    .then(() => logger.info('boot sync finished'))
+    .catch(err => logger.error({ err: err.message }, 'boot sync crashed'))
 })
 
 process.on('SIGTERM', async () => {

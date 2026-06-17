@@ -19,7 +19,12 @@ export class ImapPool {
     if (existing) this.clients.delete(k)
 
     const client = new ImapFlow({ ...opts, logger: false })
-    await client.connect()
+    await Promise.race([
+      client.connect(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`IMAP connect timeout for ${accountId}:${kind}`)), 30_000)
+      ),
+    ])
     this.clients.set(k, client)
 
     client.on('error', (err: Error) => {
