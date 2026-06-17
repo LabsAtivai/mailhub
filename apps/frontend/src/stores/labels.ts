@@ -25,16 +25,14 @@ export const useLabelStore = defineStore('labels', () => {
   }
 
   async function createLabel(name: string, color: string): Promise<Label> {
-    const { data } = await api.post('/labels', { name, color })
-    labels.value = [...labels.value, { ...data, messageCount: data.messageCount ?? 0 }]
-      .sort((a, b) => a.name.localeCompare(b.name))
-    return data
+    await api.post('/labels', { name, color })
+    await fetchLabels()
+    return labels.value[labels.value.length - 1]
   }
 
   async function updateLabel(id: string, name: string, color: string): Promise<void> {
-    const { data } = await api.patch(`/labels/${id}`, { name, color })
-    labels.value = labels.value.map(l => l.id === id ? { ...l, ...data } : l)
-      .sort((a, b) => a.name.localeCompare(b.name))
+    await api.patch(`/labels/${id}`, { name, color })
+    await fetchLabels()
   }
 
   async function deleteLabel(id: string): Promise<void> {
@@ -42,23 +40,20 @@ export const useLabelStore = defineStore('labels', () => {
     labels.value = labels.value.filter(l => l.id !== id)
   }
 
-  // Routes are now under /messages/:id/labels (no conflict with /labels/:id)
   async function assignLabel(messageId: string, labelId: string): Promise<Label[]> {
     const { data } = await api.post(`/messages/${messageId}/labels`, { labelId })
-    const l = labels.value.find(x => x.id === labelId)
-    if (l) l.messageCount++
+    await fetchLabels()
     return data
   }
 
   async function removeLabel(messageId: string, labelId: string): Promise<Label[]> {
     const { data } = await api.delete(`/messages/${messageId}/labels/${labelId}`)
-    const l = labels.value.find(x => x.id === labelId)
-    if (l && l.messageCount > 0) l.messageCount--
+    await fetchLabels()
     return data
   }
 
   async function fetchLabelMessages(labelId: string, cursor?: string) {
-    const params: any = { limit: 50 }
+    const params: Record<string, string | number> = { limit: 50 }
     if (cursor) params.cursor = cursor
     const { data } = await api.get(`/labels/${labelId}/messages`, { params })
     return data as { items: any[]; nextCursor: string | null; label: Label }

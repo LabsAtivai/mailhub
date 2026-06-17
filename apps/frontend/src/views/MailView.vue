@@ -56,6 +56,9 @@
       <ul class="folder-list" v-if="labelStore.labels.length > 0">
         <li v-for="label in labelStore.labels" :key="label.id"
           :class="{ active: activeLabelId === label.id }"
+          draggable="true"
+          @dragstart="onLabelDragStart($event, label)"
+          @dragend="onLabelDragEnd"
           @click="selectLabel(label.id)">
           <span class="label-dot-sm" :style="{ background: label.color }"></span>
           <span class="folder-name">{{ label.name }}</span>
@@ -100,7 +103,10 @@
 
         <div v-for="msg in displayMessages" :key="msg.id"
           class="msg-item"
-          :class="{ unread: !msg.isRead, selected: msg.id === mail.selectedMessage?.id }"
+          :class="{ unread: !msg.isRead, selected: msg.id === mail.selectedMessage?.id, 'drop-target': dragOverMsgId === msg.id }"
+          @dragover.prevent="onMsgDragOver($event, msg.id)"
+          @dragleave="onMsgDragLeave(msg.id)"
+          @drop.prevent="onMsgDrop($event, msg.id)"
           @click="mail.selectMessage(msg.id)">
           <div class="msg-row1">
             <span class="msg-sender">{{ msg.fromName || msg.fromEmail || '(sem remetente)' }}</span>
@@ -202,7 +208,7 @@
     <!-- dialogs -->
     <AddAccountDialog v-model:visible="showAddAccount" @added="mail.fetchAccounts()" />
     <ComposeDialog v-model:visible="showCompose" :reply-to="replyTo" :forward-msg="forwardMsg" @sent="showCompose = false" />
-    <LabelManagerDialog v-model:visible="showLabelManager" />
+    <LabelManagerDialog v-model:visible="showLabelManager" @update:visible="onLabelManagerClose" />
   </div>
 </template>
 
@@ -214,18 +220,20 @@ import InputText from 'primevue/inputtext'
 import DOMPurify from 'dompurify'
 import { useAuthStore } from '../stores/auth'
 import { useMailStore, type MessageDetail, type Attachment } from '../stores/mail'
-import { useLabelStore } from '../stores/labels'
+import { useLabelStore, type Label } from '../stores/labels'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import ComposeDialog from '../components/ComposeDialog.vue'
 import LabelManagerDialog from '../components/LabelManagerDialog.vue'
 import LabelPicker from '../components/LabelPicker.vue'
 import { api } from '../services/api'
 import { useRouter } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
 
 const auth = useAuthStore()
 const mail = useMailStore()
 const labelStore = useLabelStore()
 const router = useRouter()
+const toast = useToast()
 
 const showAddAccount = ref(false)
 const showCompose = ref(false)
@@ -236,6 +244,8 @@ const frameRef = ref<HTMLIFrameElement | null>(null)
 const searchInput = ref('')
 const activeLabelId = ref<string | null>(null)
 const expandedAccounts = ref(new Set<string>())
+const draggingLabel = ref<Label | null>(null)
+const dragOverMsgId = ref<string | null>(null)
 
 onMounted(async () => {
   await mail.fetchAccounts()
@@ -339,11 +349,53 @@ function onSearchInput() {
 function doSearch() { if (searchInput.value) mail.search(searchInput.value) }
 
 async function selectLabel(labelId: string) {
+  if (!labelId) return
   activeLabelId.value = labelId
   searchInput.value = ''
   mail.selectedMessage = null
   const result = await labelStore.fetchLabelMessages(labelId)
   await mail.loadLabelMessages(labelId, result.items, result.nextCursor)
+}
+
+function onLabelManagerClose(visible: boolean) {
+  if (!visible) labelStore.fetchLabels()
+}
+
+// ── drag-and-drop: arrastar etiqueta para mensagem ──────────────────────
+function onLabelDragStart(e: DragEvent, label: Label) {
+  if (!label.id) { e.preventDefault(); return }
+  draggingLabel.value = label
+  e.dataTransfer!.effectAllowed = 'copy'
+  e.dataTransfer!.setData('text/plain', label.id)
+}
+
+function onLabelDragEnd() {
+  draggingLabel.value = null
+  dragOverMsgId.value = null
+}
+
+function onMsgDragOver(e: DragEvent, msgId: string) {
+  if (!draggingLabel.value) return
+  e.dataTransfer!.dropEffect = 'copy'
+  dragOverMsgId.value = msgId
+}
+
+function onMsgDragLeave(msgId: string) {
+  if (dragOverMsgId.value === msgId) dragOverMsgId.value = null
+}
+
+async function onMsgDrop(e: DragEvent, msgId: string) {
+  dragOverMsgId.value = null
+  const label = draggingLabel.value
+  draggingLabel.value = null
+  if (!label?.id || !msgId) return
+  try {
+    await labelStore.assignLabel(msgId, label.id)
+    toast.add({ severity: 'success', summary: `"${label.name}" aplicada`, life: 2000 })
+    if (mail.selectedMessage?.id === msgId) mail.refreshMessage(msgId)
+  } catch {
+    toast.add({ severity: 'error', summary: 'Erro ao aplicar etiqueta', life: 3000 })
+  }
 }
 
 function openCompose(msg: MessageDetail | null) {
@@ -431,6 +483,8 @@ async function downloadAttachment(att: Attachment) {
   text-transform: uppercase; letter-spacing: .06em; color: var(--p-text-muted-color);
 }
 .label-dot-sm { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.folder-list li[draggable="true"] { cursor: grab; }
+.folder-list li[draggable="true"]:active { cursor: grabbing; }
 .icon-btn {
   background: none; border: none; cursor: pointer; padding: 2px 4px;
   border-radius: 4px; color: var(--p-text-muted-color); font-size: .8rem;
@@ -474,10 +528,14 @@ async function downloadAttachment(att: Attachment) {
 
 .msg-item {
   padding: .55rem .9rem; border-bottom: 1px solid var(--p-surface-100);
-  cursor: pointer; transition: background .08s;
+  cursor: pointer; transition: background .08s, box-shadow .15s;
 }
 .msg-item:hover { background: var(--p-surface-50); }
 .msg-item.selected { background: var(--p-primary-50); }
+.msg-item.drop-target {
+  background: var(--p-primary-50);
+  box-shadow: inset 3px 0 0 var(--p-primary-color);
+}
 .msg-item.unread .msg-sender, .msg-item.unread .msg-subject { font-weight: 700; }
 .msg-row1 { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
 .msg-sender { font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
