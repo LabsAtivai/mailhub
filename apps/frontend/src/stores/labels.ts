@@ -60,22 +60,33 @@ export const useLabelStore = defineStore('labels', () => {
   }
 
   async function assignLabel(messageId: string, labelId: string): Promise<Label[]> {
-    const { data } = await api.post(`/messages/${messageId}/labels`, { labelId })
-    const l = labels.value.find(x => x.id === labelId)
-    if (l) {
+    labels.value = labels.value.map(x =>
+      x.id === labelId ? { ...x, messageCount: x.messageCount + 1 } : x
+    )
+    try {
+      const { data } = await api.post(`/messages/${messageId}/labels`, { labelId })
+      return data
+    } catch (err) {
       labels.value = labels.value.map(x =>
-        x.id === labelId ? { ...x, messageCount: x.messageCount + 1 } : x
+        x.id === labelId ? { ...x, messageCount: Math.max(0, x.messageCount - 1) } : x
       )
+      throw err
     }
-    return data
   }
 
   async function removeLabel(messageId: string, labelId: string): Promise<Label[]> {
-    const { data } = await api.delete(`/messages/${messageId}/labels/${labelId}`)
     labels.value = labels.value.map(x =>
       x.id === labelId ? { ...x, messageCount: Math.max(0, x.messageCount - 1) } : x
     )
-    return data
+    try {
+      const { data } = await api.delete(`/messages/${messageId}/labels/${labelId}`)
+      return data
+    } catch (err) {
+      labels.value = labels.value.map(x =>
+        x.id === labelId ? { ...x, messageCount: x.messageCount + 1 } : x
+      )
+      throw err
+    }
   }
 
   async function fetchLabelMessages(labelId: string, cursor?: string) {

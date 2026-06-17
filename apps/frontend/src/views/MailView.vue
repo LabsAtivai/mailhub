@@ -126,6 +126,11 @@
           <Button label="Carregar mais" text size="small"
             :loading="mail.loadingMessages" @click="mail.loadMessages(true)" />
         </div>
+
+        <div v-if="mail.nextCursor && activeLabelId" class="load-more">
+          <Button label="Carregar mais" text size="small"
+            :loading="loadingMoreLabels" @click="loadMoreLabelMessages" />
+        </div>
       </div>
     </section>
 
@@ -137,7 +142,8 @@
           <LabelPicker
             :message-id="mail.selectedMessage.id"
             :initial-labels="mail.selectedMessage.labels ?? []"
-            @manage="showLabelManager = true" />
+            @manage="showLabelManager = true"
+            @change="onLabelPickerChange" />
           <Button icon="pi pi-reply" text size="small" label="Responder" @click="openCompose(mail.selectedMessage)" />
           <Button icon="pi pi-forward" text size="small" label="Enc." @click="openForward(mail.selectedMessage)" />
           <Button :icon="mail.selectedMessage.isFlagged ? 'pi-star-fill' : 'pi-star'"
@@ -246,6 +252,7 @@ const activeLabelId = ref<string | null>(null)
 const expandedAccounts = ref(new Set<string>())
 const draggingLabel = ref<Label | null>(null)
 const dragOverMsgId = ref<string | null>(null)
+const loadingMoreLabels = ref(false)
 
 onMounted(async () => {
   await mail.fetchAccounts()
@@ -333,8 +340,11 @@ function resizeFrame() {
 
 function onListScroll(e: Event) {
   const el = e.target as HTMLElement
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 100
-    && mail.nextCursor && !mail.loadingMessages && !searchInput.value && !activeLabelId.value) {
+  if (el.scrollHeight - el.scrollTop - el.clientHeight > 100) return
+  if (!mail.nextCursor || mail.loadingMessages || searchInput.value) return
+  if (activeLabelId.value) {
+    if (!loadingMoreLabels.value) loadMoreLabelMessages()
+  } else {
     mail.loadMessages(true)
   }
 }
@@ -355,6 +365,24 @@ async function selectLabel(labelId: string) {
   mail.selectedMessage = null
   const result = await labelStore.fetchLabelMessages(labelId)
   await mail.loadLabelMessages(labelId, result.items, result.nextCursor)
+}
+
+async function loadMoreLabelMessages() {
+  if (!activeLabelId.value || !mail.nextCursor) return
+  loadingMoreLabels.value = true
+  try {
+    const result = await labelStore.fetchLabelMessages(activeLabelId.value, mail.nextCursor)
+    mail.messages = [...mail.messages, ...result.items]
+    mail.nextCursor = result.nextCursor
+  } finally {
+    loadingMoreLabels.value = false
+  }
+}
+
+function onLabelPickerChange(updatedLabels: Label[]) {
+  if (mail.selectedMessage) {
+    mail.selectedMessage = { ...mail.selectedMessage, labels: updatedLabels }
+  }
 }
 
 function onLabelManagerClose(visible: boolean) {

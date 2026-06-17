@@ -78,14 +78,22 @@ function isAssigned(labelId: string) {
 }
 
 async function toggle_(label: Label) {
-  if (isAssigned(label.id)) {
-    const updated = await labelStore.removeLabel(props.messageId, label.id)
-    assigned.value = updated
-  } else {
-    const updated = await labelStore.assignLabel(props.messageId, label.id)
-    assigned.value = updated
+  const wasAssigned = isAssigned(label.id)
+  const prev = [...assigned.value]
+  // optimistic update
+  assigned.value = wasAssigned
+    ? assigned.value.filter(l => l.id !== label.id)
+    : [...assigned.value, label]
+  try {
+    if (wasAssigned) {
+      await labelStore.removeLabel(props.messageId, label.id)
+    } else {
+      await labelStore.assignLabel(props.messageId, label.id)
+    }
+    emit('change', assigned.value)
+  } catch {
+    assigned.value = prev
   }
-  emit('change', assigned.value)
 }
 
 function toggle() {
@@ -99,12 +107,17 @@ function toggle() {
 function positionDropdown() {
   if (!rootRef.value) return
   const rect = rootRef.value.getBoundingClientRect()
+  const dropH = 320
+  const dropW = 220
+  const spaceBelow = window.innerHeight - rect.bottom - 8
+  const top = spaceBelow >= dropH ? rect.bottom + 4 : rect.top - dropH - 4
+  const left = Math.min(rect.left, window.innerWidth - dropW - 8)
   dropdownStyle.value = {
     position: 'fixed',
-    top: rect.bottom + 4 + 'px',
-    left: rect.left + 'px',
+    top: Math.max(4, top) + 'px',
+    left: Math.max(4, left) + 'px',
     zIndex: 9999,
-    width: '220px',
+    width: dropW + 'px',
   }
 }
 
