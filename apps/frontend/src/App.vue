@@ -10,5 +10,13 @@ import Toast from 'primevue/toast'
 
 <style>
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-family: 'Inter', system-ui, sans-serif; }
+body {
+  margin: 0;
+  font-family: 'Montserrat', system-ui, sans-serif;
+  color: #111111;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a { color: #F47A20; }
+a:hover { color: #EA680C; }
 </style>

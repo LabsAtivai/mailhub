@@ -142,5 +142,5 @@ async function save() {
 .row { display: flex; gap: .75rem; align-items: flex-end; }
 .flex-1 { flex: 1; }
 .w80 { width: 80px; }
-.status-ok { display: flex; align-items: center; gap: .5rem; color: #16a34a; font-size: .875rem; padding: .5rem; background: #f0fdf4; border-radius: 6px; }
+.status-ok { display: flex; align-items: center; gap: .5rem; color: #25D366; font-size: .875rem; padding: .5rem; background: #f0fdf4; border-radius: 6px; }
 </style>

@@ -95,7 +95,7 @@ const presetColors = [
   '#64748b', '#78716c', '#0ea5e9', '#a855f7',
 ]
 
-const form = reactive({ name: '', color: '#6366f1' })
+const form = reactive({ name: '', color: '#F47A20' })
 const editing = ref<Label | null>(null)
 const submitting = ref(false)
 const formError = ref('')
@@ -127,7 +127,7 @@ async function submit() {
     } else {
       await labelStore.createLabel(form.name.trim(), form.color)
       form.name = ''
-      form.color = '#6366f1'
+      form.color = '#F47A20'
     }
   } catch (e: any) {
     formError.value = e.response?.data?.error || 'Erro ao salvar'

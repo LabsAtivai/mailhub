@@ -4,7 +4,7 @@
     <!-- ── sidebar ──────────────────────────────────────────────────────── -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <span class="logo">MailHub</span>
+        <span class="logo"><span class="logo-ativa">ATIVA</span><span class="logo-ai">.ai</span></span>
         <Button icon="pi pi-sign-out" text rounded size="small"
           v-tooltip="'Sair'" @click="logout" />
       </div>
@@ -385,8 +385,10 @@ async function downloadAttachment(att: Attachment) {
   padding: .6rem .5rem; overflow-y: auto; min-width: 0;
   background: var(--p-surface-50);
 }
-.sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 0 .25rem; }
-.logo { font-weight: 700; font-size: 1.05rem; }
+.sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: .15rem .25rem; }
+.logo { font-weight: 700; font-size: 1.1rem; letter-spacing: -.01em; }
+.logo-ativa { color: #111111; }
+.logo-ai { color: #F47A20; }
 .compose-btn { width: 100%; justify-content: center; font-size: .85rem; margin-top: .1rem; }
 .search-wrap { position: relative; margin: .1rem 0; }
 
@@ -444,7 +446,7 @@ async function downloadAttachment(att: Attachment) {
   margin-top: auto; display: flex; align-items: center; gap: .35rem;
   font-size: .68rem; color: var(--p-text-muted-color); padding: .4rem .5rem;
 }
-.socket-status.connected { color: #16a34a; }
+.socket-status.connected { color: #25D366; }
 
 /* ── message list ─────────────────────────────────────────────────────────── */
 .msg-list { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--p-surface-200); }
@@ -485,7 +487,7 @@ async function downloadAttachment(att: Attachment) {
 .msg-preview { font-size: .74rem; color: var(--p-text-muted-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .att-icon { font-size: .72rem; color: var(--p-text-muted-color); }
 .flag-btn { font-size: .78rem; color: var(--p-text-muted-color); cursor: pointer; flex-shrink: 0; }
-.flag-btn.flagged { color: #f59e0b; }
+.flag-btn.flagged { color: #F59E0B; }
 .load-more { padding: .6rem; text-align: center; }
 
 /* ── viewer ──────────────────────────────────────────────────────────────── */
@@ -500,7 +502,7 @@ async function downloadAttachment(att: Attachment) {
   padding: .35rem .75rem; border-bottom: 1px solid var(--p-surface-200); flex-shrink: 0;
 }
 .viewer-actions { display: flex; align-items: center; gap: .1rem; }
-.star-active i { color: #f59e0b; }
+.star-active i { color: #F59E0B; }
 .viewer-subject { font-size: 1.1rem; font-weight: 600; padding: .65rem 1rem .2rem; flex-shrink: 0; }
 .viewer-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0 1rem .15rem; flex-shrink: 0; }
 .viewer-from { font-size: .84rem; }

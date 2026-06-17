@@ -1,7 +1,10 @@
 <template>
   <div class="auth-page">
     <div class="auth-card">
-      <h1>MailHub</h1>
+      <div class="brand">
+        <h1><span class="brand-ativa">ATIVA</span><span class="brand-ai">.ai</span></h1>
+        <span class="brand-product">Mail</span>
+      </div>
       <p class="subtitle">Entrar na sua conta</p>
 
       <div class="field">
@@ -48,11 +51,17 @@ async function submit() {
 </script>
 
 <style scoped>
-.auth-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--p-surface-100); }
-.auth-card { background: var(--p-surface-0); padding: 2rem; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
-h1 { margin: 0 0 .25rem; font-size: 1.75rem; }
-.subtitle { color: var(--p-text-muted-color); margin: 0 0 1.5rem; }
+.auth-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F5F5F5; }
+.auth-card { background: #fff; padding: 2.5rem; border-radius: 12px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(0,0,0,.08); border-top: 3px solid #F47A20; }
+.brand { text-align: center; margin-bottom: .25rem; }
+.brand h1 { margin: 0; font-size: 2rem; letter-spacing: -.02em; line-height: 1; }
+.brand-ativa { color: #111111; font-weight: 700; }
+.brand-ai { color: #F47A20; font-weight: 700; }
+.brand-product { font-size: .85rem; font-weight: 500; color: #767676; letter-spacing: .1em; text-transform: uppercase; }
+.subtitle { color: #767676; margin: .5rem 0 1.5rem; text-align: center; font-size: .9rem; }
 .field { display: flex; flex-direction: column; gap: .4rem; margin-bottom: 1rem; }
-.field label { font-weight: 500; font-size: .875rem; }
-.link { text-align: center; margin-top: 1rem; font-size: .875rem; }
+.field label { font-weight: 500; font-size: .875rem; color: #444444; }
+.link { text-align: center; margin-top: 1rem; font-size: .875rem; color: #444444; }
+.link a { color: #F47A20; font-weight: 600; text-decoration: none; }
+.link a:hover { color: #EA680C; text-decoration: underline; }
 </style>
