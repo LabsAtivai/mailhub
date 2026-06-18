@@ -23,8 +23,8 @@ interface RawLabel {
 function toLabel(raw: RawLabel): Label {
   return {
     id: raw.id,
-    name: raw.name,
-    color: raw.color,
+    name: raw.name || '',
+    color: raw.color || '#F47A20',
     messageCount: raw.messageCount ?? raw._count?.messages ?? 0,
     createdAt: raw.createdAt,
   }

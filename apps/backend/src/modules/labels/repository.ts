@@ -31,6 +31,10 @@ export const labelRepository = {
     return prisma.label.update({ where: { id }, data })
   },
 
+  async messageCount(labelId: string) {
+    return prisma.messageLabel.count({ where: { labelId } })
+  },
+
   async remove(id: string) {
     return prisma.label.delete({ where: { id } })
   },

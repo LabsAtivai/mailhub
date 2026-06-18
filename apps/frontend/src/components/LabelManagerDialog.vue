@@ -101,9 +101,10 @@ const submitting = ref(false)
 const formError = ref('')
 
 function startEdit(label: Label) {
+  if (!label?.id) return
   editing.value = label
-  form.name = label.name
-  form.color = label.color
+  form.name = label.name || ''
+  form.color = label.color || '#F47A20'
   formError.value = ''
 }
 
@@ -115,12 +116,12 @@ function cancelEdit() {
 }
 
 async function submit() {
-  if (!form.name.trim()) { formError.value = 'Nome obrigatório'; return }
+  if (!form.name?.trim()) { formError.value = 'Nome obrigatório'; return }
   formError.value = ''
   submitting.value = true
   try {
-    if (editing.value) {
-      await labelStore.updateLabel(editing.value.id, form.name.trim(), form.color)
+    if (editing.value?.id) {
+      await labelStore.updateLabel(editing.value.id, form.name.trim(), form.color || '#F47A20')
       cancelEdit()
     } else {
       await labelStore.createLabel(form.name.trim(), form.color)

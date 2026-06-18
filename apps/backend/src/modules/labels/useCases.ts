@@ -24,7 +24,9 @@ export const labelUseCases = {
     if (data.name && await repo.findByName(userId, data.name, id)) {
       throw new ConflictError('Nome já em uso')
     }
-    return repo.update(id, data)
+    const updated = await repo.update(id, data)
+    const count = await repo.messageCount(id)
+    return { ...updated, messageCount: count }
   },
 
   async remove(id: string, userId: string) {
