@@ -90,10 +90,14 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     logger: false,
   })
   try {
-    await client.connect()
+    await Promise.race([
+      client.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout: servidor IMAP não respondeu em 20s')), 20_000)),
+    ])
     await client.logout()
     res.json({ ok: true })
   } catch (e: unknown) {
+    client.close().catch(() => {})
     const err = e as Record<string, unknown>
     const detail = err?.responseText ?? err?.serverResponseCode ?? (e instanceof Error ? e.message : 'Falha na conexão')
     res.status(400).json({ error: String(detail) })
