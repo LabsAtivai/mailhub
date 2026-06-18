@@ -94,8 +94,9 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     await client.logout()
     res.json({ ok: true })
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : 'Falha na conexão'
-    res.status(400).json({ error: message })
+    const err = e as Record<string, unknown>
+    const detail = err?.responseText ?? err?.serverResponseCode ?? (e instanceof Error ? e.message : 'Falha na conexão')
+    res.status(400).json({ error: String(detail) })
   }
 })
 

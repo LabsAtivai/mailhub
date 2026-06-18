@@ -1,14 +1,14 @@
 import jwt from 'jsonwebtoken'
 
-const ACCESS_SECRET = process.env.JWT_SECRET
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET
-
-if (!ACCESS_SECRET || ACCESS_SECRET.length < 16) {
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
   throw new Error('JWT_SECRET must be set and at least 16 characters')
 }
-if (!REFRESH_SECRET || REFRESH_SECRET.length < 16) {
+if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 16) {
   throw new Error('JWT_REFRESH_SECRET must be set and at least 16 characters')
 }
+
+const ACCESS_SECRET: string = process.env.JWT_SECRET
+const REFRESH_SECRET: string = process.env.JWT_REFRESH_SECRET
 
 export interface JwtPayload {
   userId: string
@@ -24,9 +24,9 @@ export function signRefresh(payload: JwtPayload): string {
 }
 
 export function verifyAccess(token: string): JwtPayload {
-  return jwt.verify(token, ACCESS_SECRET) as JwtPayload
+  return jwt.verify(token, ACCESS_SECRET) as unknown as JwtPayload
 }
 
 export function verifyRefresh(token: string): JwtPayload {
-  return jwt.verify(token, REFRESH_SECRET) as JwtPayload
+  return jwt.verify(token, REFRESH_SECRET) as unknown as JwtPayload
 }

@@ -1,4 +1,4 @@
-import { ImapFlow } from 'imapflow'
+import { ImapFlow, ImapFlowOptions } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import { prisma } from '../lib/prisma'
 import { decrypt } from '../lib/crypto'
@@ -25,14 +25,14 @@ interface ImapAccount {
   emailAddress: string
 }
 
-function imapOptions(account: ImapAccount): Record<string, unknown> {
-  const opts: Record<string, unknown> = {
+function imapOptions(account: ImapAccount): ImapFlowOptions {
+  const opts: ImapFlowOptions = {
     host: account.incomingHost,
     port: account.incomingPort,
     secure: account.tlsMode === 'TLS',
     auth: { user: account.username, pass: decrypt(account.encryptedPassword) },
   }
-  if (IMAP_PROXY) opts.proxy = IMAP_PROXY
+  if (IMAP_PROXY) (opts as Record<string, unknown>).proxy = IMAP_PROXY
   return opts
 }
 
@@ -88,13 +88,14 @@ export async function syncAccount(accountId: string): Promise<void> {
       log.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'idle start failed'))
 
   } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err)
-    log.error({ accountId, err: errMsg }, 'sync failed')
+    const e = err as Record<string, unknown>
+    const errMsg = e?.responseText ?? e?.serverResponseCode ?? (err instanceof Error ? err.message : String(err))
+    log.error({ accountId, err: String(errMsg), code: e?.serverResponseCode }, 'sync failed')
     await prisma.mailAccount.update({
       where: { id: accountId },
-      data: { syncState: 'ERROR', lastError: errMsg }
+      data: { syncState: 'ERROR', lastError: String(errMsg) }
     })
-    await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'ERROR', error: errMsg }))
+    await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'ERROR', error: String(errMsg) }))
   }
 }
 
@@ -180,11 +181,11 @@ async function batchFetchAndUpsert(
   const batch: Array<Record<string, unknown>> = []
 
   for await (const msg of client.fetch(
-    range,
+    range as any,
     { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true },
     options
   )) {
-    batch.push(msg as Record<string, unknown>)
+    batch.push(msg as unknown as Record<string, unknown>)
     if (batch.length >= BATCH_SIZE) {
       await upsertBatch(accountId, folderId, batch, notify)
       batch.length = 0
@@ -248,7 +249,7 @@ async function upsertBatch(
   }
 
   if (toCreate.length > 0) {
-    await prisma.message.createMany({ data: toCreate as Parameters<typeof prisma.message.createMany>[0]['data'], skipDuplicates: true })
+    await prisma.message.createMany({ data: toCreate as any, skipDuplicates: true })
   }
 
   if (toUpdate.length > 0) {
@@ -374,7 +375,7 @@ export async function fetchBody(messageId: string): Promise<void> {
   const lock = await client.getMailboxLock(msg.folder.path)
   try {
     const rawMsg = await client.fetchOne(String(msg.uid), { source: true }, { uid: true })
-    const source = rawMsg ? (rawMsg as Record<string, unknown>).source : undefined
+    const source = rawMsg ? (rawMsg as unknown as Record<string, unknown>).source : undefined
     if (!rawMsg || !source) {
       await prisma.message.update({
         where: { id: messageId },
