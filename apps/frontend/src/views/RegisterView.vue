@@ -24,6 +24,7 @@ import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useAuthStore } from '../stores/auth'
+import { extractError } from '../services/errorMessage'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -33,7 +34,7 @@ const loading = ref(false); const error = ref('')
 async function submit() {
   error.value = ''; loading.value = true
   try { await auth.register(name.value, email.value, password.value); router.push('/') }
-  catch (e: any) { error.value = e.response?.data?.error || 'Erro ao criar conta' }
+  catch (e: unknown) { error.value = extractError(e, 'Erro ao criar conta') }
   finally { loading.value = false }
 }
 </script>

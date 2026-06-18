@@ -9,7 +9,6 @@ const log = scope('messages')
 export class ForbiddenError extends Error {}
 export class NotFoundError extends Error {}
 
-// Verify the message belongs to the user; throws if not. Returns flattened message.
 async function requireOwnedMessage(messageId: string, userId: string) {
   const msg = await repo.findMessageWithOwner(messageId)
   if (!msg || msg.folder.account.userId !== userId) throw new NotFoundError('Mensagem não encontrada')
@@ -20,6 +19,16 @@ async function requireOwnedFolder(folderId: string, userId: string) {
   const folder = await repo.findFolderWithOwner(folderId)
   if (!folder || folder.account.userId !== userId) throw new NotFoundError('Pasta não encontrada')
   return folder
+}
+
+interface SearchFilters {
+  fromEmail?: { contains: string; mode: string }
+  toJson?: { contains: string; mode: string }
+  subject?: { contains: string; mode: string }
+  hasAttachments?: boolean
+  isRead?: boolean
+  isFlagged?: boolean
+  OR?: Array<Record<string, unknown>>
 }
 
 export const messageUseCases = {
@@ -47,7 +56,6 @@ export const messageUseCases = {
 
   async setFlags(messageId: string, userId: string, flags: { isRead?: boolean; isFlagged?: boolean }) {
     const msg = await requireOwnedMessage(messageId, userId)
-    // IMAP first (via worker), then DB (AP-001)
     await redis.publish('mailhub:flag:update', JSON.stringify({
       messageId: msg.id, accountId: msg.folder.account.id,
       folderId: msg.folderId, uid: msg.uid.toString(), ...flags,
@@ -77,7 +85,7 @@ export const messageUseCases = {
     const q = rawQuery.trim()
     if (!q) return []
 
-    const filters: any = {}
+    const filters: SearchFilters = {}
     let freeText = q
 
     const grab = (re: RegExp, apply: (m: RegExpMatchArray) => void) => {
@@ -92,7 +100,7 @@ export const messageUseCases = {
     if (/is:read/.test(q)) { filters.isRead = true; freeText = freeText.replace('is:read', '').trim() }
     if (/is:flagged/.test(q)) { filters.isFlagged = true; freeText = freeText.replace('is:flagged', '').trim() }
 
-    const where: any = { ...filters }
+    const where: Record<string, unknown> = { ...filters }
     if (freeText) {
       where.OR = [
         { subject: { contains: freeText, mode: 'insensitive' } },
@@ -132,6 +140,8 @@ export const messageUseCases = {
       inReplyTo: dto.inReplyTo,
       references: dto.inReplyTo,
     })
+
+    transporter.close()
 
     await redis.publish('mailhub:sent:append', JSON.stringify({
       accountId: account.id, messageId: info.messageId,

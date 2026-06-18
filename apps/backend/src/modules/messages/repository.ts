@@ -21,6 +21,16 @@ const LIST_SELECT = {
   date: true, isRead: true, isFlagged: true, hasAttachments: true, size: true,
 } as const
 
+function parseCursor(cursor: string): { date: Date; id: string } {
+  const sepIndex = cursor.indexOf('_')
+  if (sepIndex === -1) throw new Error('Invalid cursor format')
+  const dateStr = cursor.slice(0, sepIndex)
+  const id = cursor.slice(sepIndex + 1)
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime()) || !id) throw new Error('Invalid cursor format')
+  return { date, id }
+}
+
 export const messageRepository = {
   // ownership-aware lookups
   async findFolderWithOwner(folderId: string) {
@@ -43,10 +53,10 @@ export const messageRepository = {
 
   // listing
   async listByFolder(folderId: string, limit: number, cursor?: string) {
-    const where: any = { folderId }
+    const where: Record<string, unknown> = { folderId }
     if (cursor) {
-      const [date, id] = cursor.split('_')
-      where.OR = [{ date: { lt: new Date(date) } }, { date: new Date(date), id: { lt: id } }]
+      const { date, id } = parseCursor(cursor)
+      where.OR = [{ date: { lt: date } }, { date, id: { lt: id } }]
     }
     return prisma.message.findMany({
       where,
@@ -61,7 +71,7 @@ export const messageRepository = {
     return accounts.map(a => a.id)
   },
 
-  async search(accountIds: string[], where: any, limit = 50) {
+  async search(accountIds: string[], where: Record<string, unknown>, limit = 50) {
     return prisma.message.findMany({
       where: { accountId: { in: accountIds }, ...where },
       orderBy: { date: 'desc' },

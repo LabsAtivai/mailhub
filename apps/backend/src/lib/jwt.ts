@@ -1,7 +1,14 @@
 import jwt from 'jsonwebtoken'
 
-const ACCESS_SECRET = process.env.JWT_SECRET!
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!
+const ACCESS_SECRET = process.env.JWT_SECRET
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET
+
+if (!ACCESS_SECRET || ACCESS_SECRET.length < 16) {
+  throw new Error('JWT_SECRET must be set and at least 16 characters')
+}
+if (!REFRESH_SECRET || REFRESH_SECRET.length < 16) {
+  throw new Error('JWT_REFRESH_SECRET must be set and at least 16 characters')
+}
 
 export interface JwtPayload {
   userId: string

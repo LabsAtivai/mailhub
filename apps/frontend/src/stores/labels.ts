@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../services/api'
+import type { MessageSummary } from './mail'
 
 export interface Label {
   id: string
@@ -10,7 +11,16 @@ export interface Label {
   createdAt: string
 }
 
-function toLabel(raw: any): Label {
+interface RawLabel {
+  id: string
+  name: string
+  color: string
+  messageCount?: number
+  _count?: { messages: number }
+  createdAt: string
+}
+
+function toLabel(raw: RawLabel): Label {
   return {
     id: raw.id,
     name: raw.name,
@@ -93,7 +103,7 @@ export const useLabelStore = defineStore('labels', () => {
     const params: Record<string, string | number> = { limit: 50 }
     if (cursor) params.cursor = cursor
     const { data } = await api.get(`/labels/${labelId}/messages`, { params })
-    return data as { items: any[]; nextCursor: string | null; label: Label }
+    return data as { items: MessageSummary[]; nextCursor: string | null; label: Label }
   }
 
   return {

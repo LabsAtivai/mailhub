@@ -10,7 +10,6 @@ export function getSocket(): Socket {
       transports: ['websocket'],
       reconnectionAttempts: 10,
     })
-    socket.on('connect_error', (err) => console.warn('[socket]', err.message))
   }
   return socket
 }

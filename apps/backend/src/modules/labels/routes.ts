@@ -3,14 +3,18 @@ import { requireAuth, AuthRequest } from '../../middleware/auth'
 import { labelUseCases as uc, ConflictError } from './useCases'
 import { NotFoundError } from '../messages/useCases'
 import { CreateLabelSchema, UpdateLabelSchema } from './dto'
+import { scope } from '../../lib/logger'
 
+const log = scope('labels')
 const router = Router()
 router.use(requireAuth)
 
 function handle(res: Response, err: unknown) {
   if (err instanceof NotFoundError) { res.status(404).json({ error: err.message }); return }
   if (err instanceof ConflictError) { res.status(409).json({ error: err.message }); return }
-  res.status(500).json({ error: (err as Error).message })
+  const message = err instanceof Error ? err.message : 'Internal server error'
+  log.error({ err }, 'unhandled error in labels module')
+  res.status(500).json({ error: message })
 }
 
 router.get('/', async (req: AuthRequest, res: Response) => {

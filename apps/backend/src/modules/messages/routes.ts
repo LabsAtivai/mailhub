@@ -2,15 +2,18 @@ import { Router, Response } from 'express'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
 import { messageUseCases as uc, NotFoundError, ForbiddenError } from './useCases'
 import { SetFlagsSchema, MoveMessageSchema, SendMailSchema, AssignLabelSchema } from './dto'
+import { scope } from '../../lib/logger'
 
+const log = scope('messages')
 const router = Router()
 router.use(requireAuth)
 
-// thin error adapter — maps domain errors to HTTP
 function handle(res: Response, err: unknown) {
   if (err instanceof NotFoundError) { res.status(404).json({ error: err.message }); return }
   if (err instanceof ForbiddenError) { res.status(403).json({ error: err.message }); return }
-  res.status(500).json({ error: (err as Error).message })
+  const message = err instanceof Error ? err.message : 'Internal server error'
+  log.error({ err }, 'unhandled error in messages module')
+  res.status(500).json({ error: message })
 }
 
 // GET /folders/:folderId/messages

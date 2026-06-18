@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
 import { syncAccount, fetchBody, ensureIdle, getOpsClient } from './sync/syncAccount'
@@ -19,22 +20,60 @@ sub.subscribe(
   (err) => { if (err) logger.error({ err }, 'redis subscribe error') }
 )
 
+const SyncStartSchema = z.object({ accountId: z.string() })
+const FetchBodySchema = z.object({ messageId: z.string() })
+const FlagUpdateSchema = z.object({
+  accountId: z.string(), uid: z.string(), messageId: z.string(),
+  isRead: z.boolean().optional(), isFlagged: z.boolean().optional(),
+})
+const MoveSchema = z.object({
+  accountId: z.string(), uid: z.string(), messageId: z.string(),
+  sourceFolderId: z.string(), targetFolderId: z.string(),
+})
+const DeleteSchema = z.object({
+  accountId: z.string(), uid: z.string(), messageId: z.string(),
+  folderId: z.string(), trashFolderId: z.string().nullable().optional(),
+})
+
 sub.on('message', async (channel: string, message: string) => {
   try {
-    const payload = JSON.parse(message)
+    const raw = JSON.parse(message)
     switch (channel) {
-      case 'mailhub:sync:start':   await syncAccount(payload.accountId); break
-      case 'mailhub:fetch:body':   await fetchBody(payload.messageId); break
-      case 'mailhub:flag:update':  await handleFlagUpdate(payload); break
-      case 'mailhub:message:move': await handleMove(payload); break
-      case 'mailhub:message:delete': await handleDelete(payload); break
+      case 'mailhub:sync:start': {
+        const p = SyncStartSchema.parse(raw)
+        await syncAccount(p.accountId)
+        break
+      }
+      case 'mailhub:fetch:body': {
+        const p = FetchBodySchema.parse(raw)
+        await fetchBody(p.messageId)
+        break
+      }
+      case 'mailhub:flag:update': {
+        const p = FlagUpdateSchema.parse(raw)
+        await handleFlagUpdate(p)
+        break
+      }
+      case 'mailhub:message:move': {
+        const p = MoveSchema.parse(raw)
+        await handleMove(p)
+        break
+      }
+      case 'mailhub:message:delete': {
+        const p = DeleteSchema.parse(raw)
+        await handleDelete(p)
+        break
+      }
     }
-  } catch (err: any) {
-    logger.error({ channel, err: err.message }, 'command handler error')
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    logger.error({ channel, err: errMsg }, 'command handler error')
   }
 })
 
-async function handleFlagUpdate(payload: any) {
+interface FlagPayload { accountId: string; uid: string; messageId: string; isRead?: boolean; isFlagged?: boolean }
+
+async function handleFlagUpdate(payload: FlagPayload) {
   const { accountId, uid, isRead, isFlagged, messageId } = payload
   const msg = await prisma.message.findUnique({ where: { id: messageId }, include: { folder: true } })
   if (!msg) return
@@ -42,26 +81,27 @@ async function handleFlagUpdate(payload: any) {
   const client = await getOpsClient(accountId)
   const lock = await client.getMailboxLock(msg.folder.path)
   try {
-    const uidStr = String(uid)
     if (typeof isRead === 'boolean') {
-      if (isRead) await client.messageFlagsAdd(uidStr, ['\\Seen'], { uid: true })
-      else await client.messageFlagsRemove(uidStr, ['\\Seen'], { uid: true })
+      if (isRead) await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true })
+      else await client.messageFlagsRemove(uid, ['\\Seen'], { uid: true })
     }
     if (typeof isFlagged === 'boolean') {
-      if (isFlagged) await client.messageFlagsAdd(uidStr, ['\\Flagged'], { uid: true })
-      else await client.messageFlagsRemove(uidStr, ['\\Flagged'], { uid: true })
+      if (isFlagged) await client.messageFlagsAdd(uid, ['\\Flagged'], { uid: true })
+      else await client.messageFlagsRemove(uid, ['\\Flagged'], { uid: true })
     }
   } finally {
     lock.release()
   }
 
-  const update: any = { accountId, messageId }
+  const update: Record<string, unknown> = { accountId, messageId }
   if (typeof isRead === 'boolean') update.isRead = isRead
   if (typeof isFlagged === 'boolean') update.isFlagged = isFlagged
   await redis.publish('mail:updated', JSON.stringify(update))
 }
 
-async function handleMove(payload: any) {
+interface MovePayload { accountId: string; uid: string; messageId: string; sourceFolderId: string; targetFolderId: string }
+
+async function handleMove(payload: MovePayload) {
   const { accountId, uid, sourceFolderId, targetFolderId, messageId } = payload
   const [source, target] = await Promise.all([
     prisma.folder.findUnique({ where: { id: sourceFolderId } }),
@@ -72,18 +112,18 @@ async function handleMove(payload: any) {
   const client = await getOpsClient(accountId)
   const lock = await client.getMailboxLock(source.path)
   try {
-    await client.messageMove(String(uid), target.path, { uid: true })
+    await client.messageMove(uid, target.path, { uid: true })
   } finally {
     lock.release()
   }
 
-  // UID changes when a message moves folders — remove the stale row;
-  // the next incremental sync of the target folder re-imports it.
   await prisma.message.delete({ where: { id: messageId } }).catch(() => {})
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId: sourceFolderId }))
 }
 
-async function handleDelete(payload: any) {
+interface DeletePayload { accountId: string; uid: string; messageId: string; folderId: string; trashFolderId?: string | null }
+
+async function handleDelete(payload: DeletePayload) {
   const { accountId, uid, folderId, trashFolderId, messageId } = payload
   const source = await prisma.folder.findUnique({ where: { id: folderId } })
   if (!source) return
@@ -93,9 +133,9 @@ async function handleDelete(payload: any) {
   try {
     if (trashFolderId) {
       const trash = await prisma.folder.findUnique({ where: { id: trashFolderId } })
-      if (trash) await client.messageMove(String(uid), trash.path, { uid: true })
+      if (trash) await client.messageMove(uid, trash.path, { uid: true })
     } else {
-      await client.messageDelete(String(uid), { uid: true })
+      await client.messageDelete(uid, { uid: true })
     }
   } finally {
     lock.release()
@@ -112,23 +152,39 @@ async function runWithConcurrency(
   label: string,
 ): Promise<void> {
   const queue = [...ids]
+  const results: Array<{ id: string; error?: string }> = []
   const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
     while (queue.length > 0) {
       const id = queue.shift()!
-      await syncAccount(id).catch(e =>
-        logger.error({ accountId: id, err: e.message }, `${label} sync failed`))
+      try {
+        await syncAccount(id)
+        results.push({ id })
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e)
+        logger.error({ accountId: id, err: errMsg }, `${label} sync failed`)
+        results.push({ id, error: errMsg })
+      }
     }
   })
-  await Promise.all(workers)
+  await Promise.allSettled(workers)
+  const failed = results.filter(r => r.error)
+  if (failed.length > 0) {
+    logger.warn({ failedCount: failed.length, total: ids.length }, `${label} sync completed with errors`)
+  }
 }
 
 // ── periodic incremental sync every 2 minutes ───────────────────────────────
 setInterval(async () => {
-  const accounts = await prisma.mailAccount.findMany({
-    where: { syncEnabled: true, syncState: { not: 'SYNCING' } },
-    select: { id: true }
-  })
-  runWithConcurrency(accounts.map(a => a.id), 10, 'periodic').catch(() => {})
+  try {
+    const accounts = await prisma.mailAccount.findMany({
+      where: { syncEnabled: true, syncState: { not: 'SYNCING' } },
+      select: { id: true }
+    })
+    await runWithConcurrency(accounts.map(a => a.id), 10, 'periodic')
+  } catch (err) {
+    const errMsg = err instanceof Error ? (err as Error).message : String(err)
+    logger.error({ err: errMsg }, 'periodic sync scheduler error')
+  }
 }, 2 * 60 * 1000)
 
 // ── boot: reset stale SYNCING states + sync all accounts ────────────────────
@@ -142,7 +198,7 @@ prisma.mailAccount.updateMany({
   logger.info({ count: accounts.length }, 'accounts to sync on boot')
   runWithConcurrency(accounts.map(a => a.id), 10, 'boot')
     .then(() => logger.info('boot sync finished'))
-    .catch(err => logger.error({ err: err.message }, 'boot sync crashed'))
+    .catch(err => logger.error({ err: err instanceof Error ? err.message : String(err) }, 'boot sync crashed'))
 })
 
 process.on('SIGTERM', async () => {

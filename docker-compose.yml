@@ -4,11 +4,11 @@ services:
     environment:
       POSTGRES_DB: mailhub
       POSTGRES_USER: mailhub
-      POSTGRES_PASSWORD: mailhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mailhub}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"   # 5433 no host para não conflitar com Postgres local
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mailhub"]
       interval: 5s
@@ -18,22 +18,22 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6380:6379"   # 6380 no host para não conflitar com Redis local
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
 
   backend:
     build:
-      context: ./mailhub-backend
+      context: ./apps/backend
     ports:
       - "3001:3001"
     environment:
-      DATABASE_URL: postgresql://mailhub:mailhub@postgres:5432/mailhub
+      DATABASE_URL: postgresql://mailhub:${POSTGRES_PASSWORD:-mailhub}@postgres:5432/mailhub
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-prod}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-36d99276a1a97d6b459a18117a55819035f1721b2116e50349ccb8de6e6238a6}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CORS_ORIGIN: http://localhost:5173
       PORT: 3001
     depends_on:
@@ -41,16 +41,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: sh -c "npx prisma db push --accept-data-loss && npm run start"
     profiles: ["full"]
 
   worker:
     build:
-      context: ./mailhub-worker
+      context: ./apps/worker
     environment:
-      DATABASE_URL: postgresql://mailhub:mailhub@postgres:5432/mailhub
+      DATABASE_URL: postgresql://mailhub:${POSTGRES_PASSWORD:-mailhub}@postgres:5432/mailhub
       REDIS_URL: redis://redis:6379
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-36d99276a1a97d6b459a18117a55819035f1721b2116e50349ccb8de6e6238a6}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,7 +57,9 @@ services:
 
   frontend:
     build:
-      context: ./mailhub-frontend
+      context: ./apps/frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     ports:
       - "8080:80"
     depends_on:

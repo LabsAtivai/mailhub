@@ -37,9 +37,18 @@ import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import { api } from '../services/api'
+import { extractError } from '../services/errorMessage'
 import { useMailStore } from '../stores/mail'
 
-const props = defineProps<{ visible: boolean; replyTo?: any }>()
+interface ReplyMessage {
+  fromEmail?: string | null
+  subject?: string | null
+  date: string
+  textBody?: string | null
+  messageId?: string | null
+}
+
+const props = defineProps<{ visible: boolean; replyTo?: ReplyMessage | null }>()
 const emit = defineEmits(['update:visible', 'sent'])
 const mail = useMailStore()
 
@@ -71,8 +80,8 @@ async function send() {
     emit('sent')
     emit('update:visible', false)
     Object.assign(form, { to: '', cc: '', subject: '', body: '' })
-  } catch (e: any) {
-    error.value = e.response?.data?.error || 'Erro ao enviar'
+  } catch (e: unknown) {
+    error.value = extractError(e, 'Erro ao enviar')
   } finally { sending.value = false }
 }
 </script>

@@ -103,7 +103,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-frontend:latest
             ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-frontend:${{ github.sha }}
           build-args: |
-            VITE_API_URL=https://mailhub.labsativa.com.br
+            VITE_API_URL=${{ secrets.VITE_API_URL }}
       - name: Trigger Portainer
         run: curl -s -X POST "${{ secrets.PORTAINER_WEBHOOK_FRONTEND }}"
         continue-on-error: true

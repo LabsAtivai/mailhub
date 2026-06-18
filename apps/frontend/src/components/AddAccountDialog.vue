@@ -75,6 +75,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import { api } from '../services/api'
+import { extractError } from '../services/errorMessage'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits(['update:visible', 'added'])
@@ -110,9 +111,9 @@ async function testConn() {
   try {
     await api.post('/accounts/test', { ...form })
     testResult.value = 'ok'
-  } catch (e: any) {
+  } catch (e: unknown) {
     testResult.value = 'error'
-    testError.value = e.response?.data?.error || 'Falha na conexão IMAP'
+    testError.value = extractError(e, 'Falha na conexão IMAP')
   } finally { testing.value = false }
 }
 
@@ -128,9 +129,9 @@ async function save() {
       incomingHost: '', incomingPort: 993, outgoingHost: '', outgoingPort: 465, tlsMode: 'TLS'
     })
     testResult.value = null
-  } catch (e: any) {
+  } catch (e: unknown) {
     testResult.value = 'error'
-    testError.value = e.response?.data?.error || 'Erro ao salvar'
+    testError.value = extractError(e, 'Erro ao salvar')
   } finally { saving.value = false }
 }
 </script>

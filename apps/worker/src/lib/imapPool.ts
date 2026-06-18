@@ -16,7 +16,10 @@ export class ImapPool {
     const k = this.key(accountId, kind)
     const existing = this.clients.get(k)
     if (existing?.usable) return existing
-    if (existing) this.clients.delete(k)
+    if (existing) {
+      existing.removeAllListeners()
+      this.clients.delete(k)
+    }
 
     const client = new ImapFlow({ ...opts, logger: false })
     await Promise.race([
@@ -29,9 +32,11 @@ export class ImapPool {
 
     client.on('error', (err: Error) => {
       log.error({ key: k, err: err.message }, 'connection error')
+      client.removeAllListeners()
       this.clients.delete(k)
     })
     client.on('close', () => {
+      client.removeAllListeners()
       this.clients.delete(k)
     })
 
@@ -48,6 +53,7 @@ export class ImapPool {
       const k = this.key(accountId, kind)
       const client = this.clients.get(k)
       if (client) {
+        client.removeAllListeners()
         await client.logout().catch(() => {})
         this.clients.delete(k)
       }

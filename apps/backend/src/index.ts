@@ -2,19 +2,19 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
+import helmet from 'helmet'
 import http from 'http'
 import { Server as SocketServer } from 'socket.io'
 import { redis } from './lib/redis'
+import { prisma } from './lib/prisma'
 import { verifyAccess } from './lib/jwt'
-// BigInt não serializa nativamente para JSON — fix global
-;(BigInt.prototype as any).toJSON = function () { return this.toString() }
+import { logger } from './lib/logger'
 
 import authRoutes from './modules/auth/routes'
 import accountRoutes from './modules/accounts/routes'
 import folderRoutes from './modules/folders/routes'
 import messageRoutes from './modules/messages/routes'
 import labelRoutes from './modules/labels/routes'
-import { logger } from './lib/logger'
 
 const app = express()
 const server = http.createServer(app)
@@ -23,7 +23,25 @@ const io = new SocketServer(server, {
   cors: { origin: process.env.CORS_ORIGIN, credentials: true },
 })
 
+// BigInt serialization via Express json replacer (no global prototype mutation)
+app.set('json replacer', (_key: string, value: unknown) =>
+  typeof value === 'bigint' ? value.toString() : value
+)
+
 // ── middleware ──────────────────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      connectSrc: ["'self'", 'wss:', 'ws:'],
+      imgSrc: ["'self'", 'data:'],
+      frameSrc: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}))
 app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }))
 app.use(express.json({ limit: '26mb' }))
 app.use(cookieParser())
@@ -52,10 +70,16 @@ io.use((socket, next) => {
 })
 
 io.on('connection', (socket) => {
-  // client joins rooms for its accounts
-  socket.on('join:account', (accountId: string) => {
+  socket.on('join:account', async (accountId: string) => {
+    if (!accountId || typeof accountId !== 'string') return
+    const account = await prisma.mailAccount.findFirst({
+      where: { id: accountId, userId: socket.data.userId },
+      select: { id: true },
+    })
+    if (!account) return
     socket.join(`account:${accountId}`)
   })
+
   socket.on('leave:account', (accountId: string) => {
     socket.leave(`account:${accountId}`)
   })
@@ -76,10 +100,14 @@ redisSub.subscribe(...EVENTS, (err) => {
 redisSub.on('message', (channel: string, message: string) => {
   try {
     const payload = JSON.parse(message)
-    if (payload.accountId) {
-      io.to(`account:${payload.accountId}`).emit(channel, payload)
+    if (!payload.accountId) {
+      logger.warn({ channel }, 'redis message missing accountId')
+      return
     }
-  } catch { /* ignore malformed */ }
+    io.to(`account:${payload.accountId}`).emit(channel, payload)
+  } catch (err) {
+    logger.error({ channel, err }, 'redis message parse error')
+  }
 })
 
 const PORT = process.env.PORT || 3001

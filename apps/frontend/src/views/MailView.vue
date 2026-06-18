@@ -321,8 +321,10 @@ function formatDateFull(iso: string): string {
 }
 
 function formatAddresses(json: string): string {
-  try { return JSON.parse(json).map((x: any) => x.address || x.name || x).join(', ') }
-  catch { return json }
+  try {
+    const parsed = JSON.parse(json) as Array<{ address?: string; name?: string }>
+    return parsed.map(x => x.address || x.name || String(x)).join(', ')
+  } catch { return json }
 }
 
 function formatSize(bytes: number): string {
@@ -446,8 +448,12 @@ async function downloadAttachment(att: Attachment) {
       const a = document.createElement('a')
       a.href = url; a.download = att.filename; a.click()
       URL.revokeObjectURL(url)
+    } else {
+      toast.add({ severity: 'info', summary: 'Download solicitado', detail: 'O anexo está sendo preparado. Tente novamente em instantes.', life: 4000 })
     }
-  } catch { /* silently fail */ }
+  } catch {
+    toast.add({ severity: 'error', summary: 'Erro ao baixar anexo', life: 3000 })
+  }
 }
 </script>
 

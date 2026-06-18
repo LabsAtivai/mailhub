@@ -32,7 +32,6 @@ export const useMailStore = defineStore('mail', () => {
   const foldersByAccount = ref<Record<string, Folder[]>>({})
   const selectedAccountId = ref<string | null>(null)
   const selectedFolderId = ref<string | null>(null)
-  // shallowRef for large arrays — avoids deep reactive overhead on 1000s of messages
   const messages = shallowRef<MessageSummary[]>([])
   const nextCursor = ref<string | null>(null)
   const selectedMessage = ref<MessageDetail | null>(null)
@@ -50,10 +49,8 @@ export const useMailStore = defineStore('mail', () => {
     for (const acc of data) {
       await fetchFolders(acc.id)
     }
-    // single socket setup call — not per-account
     setupSocket(data.map((a: MailAccount) => a.id))
 
-    // auto-select INBOX of first account
     if (data.length > 0 && !selectedFolderId.value) {
       const firstFolders = foldersByAccount.value[data[0].id] ?? []
       const inbox = firstFolders.find(
@@ -84,11 +81,13 @@ export const useMailStore = defineStore('mail', () => {
     if (!selectedFolderId.value) return
     loadingMessages.value = true
     try {
-      const params: any = { limit: 50 }
+      const params: Record<string, unknown> = { limit: 50 }
       if (append && nextCursor.value) params.cursor = nextCursor.value
       const { data } = await api.get(`/folders/${selectedFolderId.value}/messages`, { params })
       messages.value = append ? [...messages.value, ...data.items] : data.items
       nextCursor.value = data.nextCursor
+    } catch {
+      // keep existing messages on error
     } finally {
       loadingMessages.value = false
     }
@@ -98,8 +97,12 @@ export const useMailStore = defineStore('mail', () => {
   async function search(q: string) {
     searchQuery.value = q
     if (!q.trim()) { searchResults.value = []; return }
-    const { data } = await api.get('/messages/search', { params: { q } })
-    searchResults.value = data.items
+    try {
+      const { data } = await api.get('/messages/search', { params: { q } })
+      searchResults.value = data.items
+    } catch {
+      searchResults.value = []
+    }
   }
 
   // ── message detail ─────────────────────────────────────────────────────────
@@ -110,13 +113,11 @@ export const useMailStore = defineStore('mail', () => {
       const { data } = await api.get(`/messages/${id}`)
       selectedMessage.value = data
 
-      // mark read optimistically in list
       const target = messages.value.find(x => x.id === id)
         || searchResults.value.find(x => x.id === id)
       if (target && !target.isRead) {
-        // mutate a shallow copy to trigger shallowRef update
         messages.value = messages.value.map(m => m.id === id ? { ...m, isRead: true } : m)
-        api.patch(`/messages/${id}`, { isRead: true })
+        api.patch(`/messages/${id}`, { isRead: true }).catch(() => {})
         updateFolderUnread(data.folderId, -1)
       }
     } finally {
@@ -126,8 +127,12 @@ export const useMailStore = defineStore('mail', () => {
 
   async function refreshMessage(id: string) {
     if (!selectedMessage.value || selectedMessage.value.id !== id) return
-    const { data } = await api.get(`/messages/${id}`)
-    selectedMessage.value = data
+    try {
+      const { data } = await api.get(`/messages/${id}`)
+      selectedMessage.value = data
+    } catch {
+      // keep existing message on error
+    }
   }
 
   // ── mutations ──────────────────────────────────────────────────────────────
@@ -135,7 +140,13 @@ export const useMailStore = defineStore('mail', () => {
     messages.value = messages.value.map(m => m.id === id ? { ...m, isFlagged } : m)
     searchResults.value = searchResults.value.map(m => m.id === id ? { ...m, isFlagged } : m)
     if (selectedMessage.value?.id === id) selectedMessage.value = { ...selectedMessage.value, isFlagged }
-    await api.patch(`/messages/${id}`, { isFlagged })
+    try {
+      await api.patch(`/messages/${id}`, { isFlagged })
+    } catch {
+      messages.value = messages.value.map(m => m.id === id ? { ...m, isFlagged: !isFlagged } : m)
+      searchResults.value = searchResults.value.map(m => m.id === id ? { ...m, isFlagged: !isFlagged } : m)
+      if (selectedMessage.value?.id === id) selectedMessage.value = { ...selectedMessage.value, isFlagged: !isFlagged }
+    }
   }
 
   async function deleteMessage(id: string) {
@@ -160,7 +171,7 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   // ── label view ─────────────────────────────────────────────────────────────
-  async function loadLabelMessages(labelId: string, items: any[], cursor: string | null) {
+  async function loadLabelMessages(labelId: string, items: MessageSummary[], cursor: string | null) {
     selectedFolderId.value = null
     selectedAccountId.value = null
     selectedMessage.value = null
@@ -175,7 +186,6 @@ export const useMailStore = defineStore('mail', () => {
 
   function setupSocket(accountIds: string[]) {
     if (socketInitialized) {
-      // just join new rooms
       const socket = getSocket()
       for (const id of accountIds) socket.emit('join:account', id)
       return
@@ -187,7 +197,6 @@ export const useMailStore = defineStore('mail', () => {
 
     socket.on('connect', () => {
       connected.value = true
-      // re-join all rooms after reconnect
       for (const id of accounts.value.map(a => a.id)) {
         socket.emit('join:account', id)
       }
@@ -197,7 +206,7 @@ export const useMailStore = defineStore('mail', () => {
     for (const id of accountIds) socket.emit('join:account', id)
 
     // ── mail events ──────────────────────────────────────────────────────────
-    socket.on('mail:new', (payload: any) => {
+    socket.on('mail:new', (payload: { messageId: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string }) => {
       if (payload.folderId === selectedFolderId.value) {
         const exists = messages.value.some(x => x.id === payload.messageId)
         if (!exists) {
@@ -212,18 +221,20 @@ export const useMailStore = defineStore('mail', () => {
       updateFolderUnread(payload.folderId, 1)
     })
 
-    socket.on('mail:bodyReady', (payload: any) => {
+    socket.on('mail:bodyReady', (payload: { messageId: string }) => {
       if (selectedMessage.value?.id === payload.messageId) {
         refreshMessage(payload.messageId)
       }
     })
 
-    socket.on('mail:updated', (payload: any) => {
+    socket.on('mail:updated', (payload: { messageId: string; isRead?: boolean; isFlagged?: boolean }) => {
       const patch = (m: MessageSummary): MessageSummary => {
         const wasRead = m.isRead
         const isRead = typeof payload.isRead === 'boolean' ? payload.isRead : m.isRead
         const isFlagged = typeof payload.isFlagged === 'boolean' ? payload.isFlagged : m.isFlagged
-        if (isRead !== wasRead) updateFolderUnread(selectedFolderId.value!, isRead ? -1 : 1)
+        if (isRead !== wasRead && selectedFolderId.value) {
+          updateFolderUnread(selectedFolderId.value, isRead ? -1 : 1)
+        }
         return { ...m, isRead, isFlagged }
       }
       if (messages.value.some(m => m.id === payload.messageId)) {
@@ -237,13 +248,13 @@ export const useMailStore = defineStore('mail', () => {
       }
     })
 
-    socket.on('mail:deleted', (payload: any) => {
+    socket.on('mail:deleted', (payload: { messageId: string }) => {
       messages.value = messages.value.filter(x => x.id !== payload.messageId)
       searchResults.value = searchResults.value.filter(x => x.id !== payload.messageId)
       if (selectedMessage.value?.id === payload.messageId) selectedMessage.value = null
     })
 
-    socket.on('folder:counts', (payload: any) => {
+    socket.on('folder:counts', (payload: { folderId: string; unreadCount: number; totalMessages?: number }) => {
       const updated = { ...foldersByAccount.value }
       for (const [accId, folders] of Object.entries(updated)) {
         const idx = folders.findIndex(f => f.id === payload.folderId)
@@ -261,7 +272,7 @@ export const useMailStore = defineStore('mail', () => {
       foldersByAccount.value = updated
     })
 
-    socket.on('account:syncState', (payload: any) => {
+    socket.on('account:syncState', (payload: { accountId: string; state: string; progress?: number; currentFolder?: string }) => {
       accounts.value = accounts.value.map(a =>
         a.id === payload.accountId ? { ...a, syncState: payload.state } : a
       )

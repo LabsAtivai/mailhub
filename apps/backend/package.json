@@ -17,6 +17,8 @@
                          "csv-parse":  "^7.0.0",
                          "dotenv":  "^16.4.7",
                          "express":  "^4.21.2",
+                         "express-rate-limit":  "^7.5.0",
+                         "helmet":  "^8.0.0",
                          "imapflow":  "^1.0.171",
                          "ioredis":  "^5.4.2",
                          "jsonwebtoken":  "^9.0.2",

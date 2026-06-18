@@ -127,8 +127,9 @@ async function submit() {
       form.name = ''
       form.color = '#F47A20'
     }
-  } catch (e: any) {
-    formError.value = e.response?.data?.error || 'Erro ao salvar'
+  } catch (e: unknown) {
+    const axiosErr = e as { response?: { data?: { error?: string } } }
+    formError.value = axiosErr?.response?.data?.error || 'Erro ao salvar'
   } finally {
     submitting.value = false
   }

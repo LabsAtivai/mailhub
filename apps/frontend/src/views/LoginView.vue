@@ -30,6 +30,7 @@ import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useAuthStore } from '../stores/auth'
+import { extractError } from '../services/errorMessage'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -44,8 +45,8 @@ async function submit() {
   try {
     await auth.login(email.value, password.value)
     router.push('/')
-  } catch (e: any) {
-    error.value = e.response?.data?.error || 'Erro ao entrar'
+  } catch (e: unknown) {
+    error.value = extractError(e, 'Erro ao entrar')
   } finally { loading.value = false }
 }
 </script>

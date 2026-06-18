@@ -11,8 +11,15 @@ import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
 
-// BigInt JSON fix (shared with backend output)
-;(BigInt.prototype as any).toJSON = function () { return this.toString() }
+// BigInt JSON fix — backend serializes BigInt as string, but keep support for client-side serialization
+const origStringify = JSON.stringify
+JSON.stringify = function (value: unknown, replacer?: unknown, space?: unknown) {
+  const bigintReplacer = (_k: string, v: unknown) => typeof v === 'bigint' ? v.toString() : v
+  const effectiveReplacer = typeof replacer === 'function'
+    ? (_k: string, v: unknown) => bigintReplacer(_k, (replacer as (k: string, v: unknown) => unknown)(_k, v))
+    : bigintReplacer
+  return origStringify(value, effectiveReplacer, space as number | string | undefined)
+} as typeof JSON.stringify
 
 const AtivaPreset = definePreset(Aura, {
   semantic: {

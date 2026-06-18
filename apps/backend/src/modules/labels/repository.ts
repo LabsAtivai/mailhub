@@ -36,10 +36,15 @@ export const labelRepository = {
   },
 
   async messagesByLabel(labelId: string, limit: number, cursor?: string) {
-    const where: any = { labels: { some: { labelId } } }
+    const where: Record<string, unknown> = { labels: { some: { labelId } } }
     if (cursor) {
-      const [date, id] = cursor.split('_')
-      where.OR = [{ date: { lt: new Date(date) } }, { date: new Date(date), id: { lt: id } }]
+      const sepIndex = cursor.indexOf('_')
+      if (sepIndex === -1) throw new Error('Invalid cursor format')
+      const dateStr = cursor.slice(0, sepIndex)
+      const id = cursor.slice(sepIndex + 1)
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime()) || !id) throw new Error('Invalid cursor format')
+      where.OR = [{ date: { lt: date } }, { date, id: { lt: id } }]
     }
     return prisma.message.findMany({
       where,

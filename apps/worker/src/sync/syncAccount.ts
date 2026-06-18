@@ -9,12 +9,24 @@ import { scope }  from '../lib/logger'
 const log = scope('sync')
 
 const SYNC_DAYS = 90
-const BATCH_SIZE = 200 // fetch envelope UIDs in chunks
+const BATCH_SIZE = 200
 
 const IMAP_PROXY = process.env.IMAP_PROXY_URL || ''
 
-function imapOptions(account: any) {
-  const opts: Record<string, any> = {
+interface ImapAccount {
+  id: string
+  incomingHost: string
+  incomingPort: number
+  tlsMode: string
+  username: string
+  encryptedPassword: string
+  syncEnabled: boolean
+  syncState: string
+  emailAddress: string
+}
+
+function imapOptions(account: ImapAccount): Record<string, unknown> {
+  const opts: Record<string, unknown> = {
     host: account.incomingHost,
     port: account.incomingPort,
     secure: account.tlsMode === 'TLS',
@@ -29,7 +41,7 @@ export async function getOpsClient(accountId: string): Promise<ImapFlow> {
   if (!account) throw new Error('Account not found')
   const existing = pool.get(accountId, 'ops')
   if (existing) return existing
-  return pool.connect(accountId, 'ops', imapOptions(account))
+  return pool.connect(accountId, 'ops', imapOptions(account as ImapAccount))
 }
 
 // ── Full / incremental sync ──────────────────────────────────────────────────
@@ -72,16 +84,23 @@ export async function syncAccount(accountId: string): Promise<void> {
       data: { syncState: 'IDLE', lastSyncAt: new Date(), lastError: null }
     })
     await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'IDLE', progress: 100 }))
-    ensureIdle(accountId).catch(err => log.error({ accountId, err: err.message }, 'idle start failed'))
+    ensureIdle(accountId).catch(err =>
+      log.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'idle start failed'))
 
-  } catch (err: any) {
-    log.error({ accountId, err: err.message }, 'sync failed')
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    log.error({ accountId, err: errMsg }, 'sync failed')
     await prisma.mailAccount.update({
       where: { id: accountId },
-      data: { syncState: 'ERROR', lastError: err.message }
+      data: { syncState: 'ERROR', lastError: errMsg }
     })
-    await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'ERROR', error: err.message }))
+    await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'ERROR', error: errMsg }))
   }
+}
+
+interface MailboxInfo {
+  uidValidity?: number | bigint
+  uidNext?: number | bigint
 }
 
 async function syncMessages(
@@ -90,10 +109,13 @@ async function syncMessages(
 ): Promise<void> {
   let lock
   try { lock = await client.getMailboxLock(folderPath) }
-  catch (err: any) { log.warn({ folderPath, err: err.message }, 'cannot open folder'); return }
+  catch (err: unknown) {
+    log.warn({ folderPath, err: err instanceof Error ? err.message : String(err) }, 'cannot open folder')
+    return
+  }
 
   try {
-    const mailbox = client.mailbox as any
+    const mailbox = client.mailbox as MailboxInfo | undefined
     const serverUidValidity = BigInt(mailbox?.uidValidity ?? 0)
     const serverUidNext = BigInt(mailbox?.uidNext ?? 1)
 
@@ -101,7 +123,6 @@ async function syncMessages(
     const storedUidValidity = storedFolder?.uidValidity
     const storedUidNext = storedFolder?.uidNext ?? BigInt(1)
 
-    // uidValidity changed → all stored UIDs are invalid
     if (storedUidValidity && storedUidValidity !== serverUidValidity) {
       await prisma.message.deleteMany({ where: { folderId } })
     }
@@ -109,15 +130,12 @@ async function syncMessages(
     const isFirstSync = !storedUidValidity || storedUidValidity !== serverUidValidity
 
     if (isFirstSync) {
-      // collect all messages into batches, then bulk-upsert
       await batchFetchAndUpsert(client, accountId, folderId, { since }, false)
     } else if (serverUidNext > storedUidNext) {
-      // only fetch new UIDs
       const range = `${storedUidNext}:*`
       await batchFetchAndUpsert(client, accountId, folderId, range, true, { uid: true })
     }
 
-    // incremental flag refresh: last 7 days only (avoids scanning full folder)
     if (!isFirstSync) {
       const recent = new Date(Date.now() - 7 * 864e5)
       const flagUpdates: Array<{ uid: bigint; isRead: boolean; isFlagged: boolean; isAnswered: boolean }> = []
@@ -130,7 +148,6 @@ async function syncMessages(
           isAnswered: flags.has('\\Answered'),
         })
       }
-      // batch flag updates — one transaction
       if (flagUpdates.length > 0) {
         await prisma.$transaction(
           flagUpdates.map(u => prisma.message.updateMany({
@@ -152,23 +169,22 @@ async function syncMessages(
   }
 }
 
-// Batch fetch envelopes and upsert in chunks — eliminates N+1 per message
 async function batchFetchAndUpsert(
   client: ImapFlow,
   accountId: string,
   folderId: string,
-  range: any,
+  range: unknown,
   notify: boolean,
   options?: object
 ): Promise<void> {
-  const batch: any[] = []
+  const batch: Array<Record<string, unknown>> = []
 
   for await (const msg of client.fetch(
     range,
     { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true },
     options
   )) {
-    batch.push(msg)
+    batch.push(msg as Record<string, unknown>)
     if (batch.length >= BATCH_SIZE) {
       await upsertBatch(accountId, folderId, batch, notify)
       batch.length = 0
@@ -177,25 +193,34 @@ async function batchFetchAndUpsert(
   if (batch.length > 0) await upsertBatch(accountId, folderId, batch, notify)
 }
 
-async function upsertBatch(
-  accountId: string, folderId: string, msgs: any[], notify: boolean
-): Promise<void> {
-  const uids = msgs.map(m => BigInt(m.uid))
+interface Envelope {
+  messageId?: string
+  inReplyTo?: string
+  subject?: string
+  from?: Array<{ name?: string; address?: string }>
+  to?: Array<{ name?: string; address?: string }>
+  cc?: Array<{ name?: string; address?: string }>
+  date?: Date
+}
 
-  // single query to find all existing messages in this batch
+async function upsertBatch(
+  accountId: string, folderId: string, msgs: Array<Record<string, unknown>>, notify: boolean
+): Promise<void> {
+  const uids = msgs.map(m => BigInt(m.uid as number))
+
   const existing = await prisma.message.findMany({
     where: { accountId, folderId, uid: { in: uids } },
     select: { id: true, uid: true }
   })
   const existingByUid = new Map(existing.map(e => [e.uid.toString(), e.id]))
 
-  const toCreate: any[] = []
+  const toCreate: Array<Record<string, unknown>> = []
   const toUpdate: Array<{ id: string; isRead: boolean; isFlagged: boolean; isAnswered: boolean }> = []
 
   for (const msg of msgs) {
-    const uid = BigInt(msg.uid)
-    const flags: Set<string> = msg.flags ?? new Set()
-    const env = msg.envelope ?? {}
+    const uid = BigInt(msg.uid as number)
+    const flags: Set<string> = (msg.flags as Set<string>) ?? new Set()
+    const env = (msg.envelope ?? {}) as Envelope
 
     const isRead = flags.has('\\Seen')
     const isFlagged = flags.has('\\Flagged')
@@ -214,20 +239,18 @@ async function upsertBatch(
         fromEmail: env.from?.[0]?.address || null,
         toJson: JSON.stringify(env.to || []),
         ccJson: env.cc ? JSON.stringify(env.cc) : null,
-        date: env.date || msg.internalDate || new Date(),
+        date: env.date || (msg.internalDate as Date) || new Date(),
         isRead, isFlagged, isAnswered,
         hasAttachments: hasAttach(msg.bodyStructure),
-        size: msg.size || 0,
+        size: (msg.size as number) || 0,
       })
     }
   }
 
-  // createMany is O(1) round-trips vs N creates
   if (toCreate.length > 0) {
-    await prisma.message.createMany({ data: toCreate, skipDuplicates: true })
+    await prisma.message.createMany({ data: toCreate as Parameters<typeof prisma.message.createMany>[0]['data'], skipDuplicates: true })
   }
 
-  // batch flag updates in one transaction
   if (toUpdate.length > 0) {
     await prisma.$transaction(
       toUpdate.map(u => prisma.message.update({
@@ -237,11 +260,9 @@ async function upsertBatch(
     )
   }
 
-  // notify only for new messages
   if (notify && toCreate.length > 0) {
-    // fetch the created IDs to emit events
     const created = await prisma.message.findMany({
-      where: { accountId, folderId, uid: { in: toCreate.map(m => m.uid) } },
+      where: { accountId, folderId, uid: { in: toCreate.map(m => m.uid as bigint) } },
       select: { id: true, uid: true, subject: true, fromName: true, fromEmail: true }
     })
     for (const msg of created) {
@@ -253,10 +274,11 @@ async function upsertBatch(
   }
 }
 
-function hasAttach(struct: any): boolean {
-  if (!struct) return false
-  if (typeof struct.disposition === 'string' && struct.disposition.toLowerCase() === 'attachment') return true
-  if (Array.isArray(struct.childNodes)) return struct.childNodes.some(hasAttach)
+function hasAttach(struct: unknown): boolean {
+  if (!struct || typeof struct !== 'object') return false
+  const s = struct as Record<string, unknown>
+  if (typeof s.disposition === 'string' && s.disposition.toLowerCase() === 'attachment') return true
+  if (Array.isArray(s.childNodes)) return s.childNodes.some(hasAttach)
   return false
 }
 
@@ -279,29 +301,31 @@ export async function ensureIdle(accountId: string): Promise<void> {
   const account = await prisma.mailAccount.findUnique({ where: { id: accountId } })
   if (!account) return
 
-  const client = await pool.connect(accountId, 'idle', imapOptions(account))
+  const client = await pool.connect(accountId, 'idle', imapOptions(account as ImapAccount))
   idleStarted.add(accountId)
 
   await client.mailboxOpen('INBOX')
   log.info({ accountId, email: account.emailAddress }, 'IDLE watching INBOX')
 
-  client.on('exists', (data: any) => {
+  client.on('exists', (data: { count?: number; prevCount?: number }) => {
     handleNewMessages(client, accountId, data).catch(err =>
-      log.error({ accountId, err: err.message }, 'idle new-message handler failed'))
+      log.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'idle new-message handler failed'))
   })
 
-  client.on('flags', (data: any) => {
-    handleFlagChange(accountId, data).catch(() => {})
+  client.on('flags', (data: { uid?: number; flags?: Set<string> }) => {
+    handleFlagChange(accountId, data).catch(err =>
+      log.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'idle flag handler failed'))
   })
 
   client.on('close', () => {
     idleStarted.delete(accountId)
     log.warn({ accountId }, 'IDLE closed, reconnecting in 30s')
-    setTimeout(() => ensureIdle(accountId).catch(e => log.error({ accountId, err: e.message }, 'idle reconnect failed')), 30_000)
+    setTimeout(() => ensureIdle(accountId).catch(e =>
+      log.error({ accountId, err: e instanceof Error ? e.message : String(e) }, 'idle reconnect failed')), 30_000)
   })
 }
 
-async function handleNewMessages(client: ImapFlow, accountId: string, data: any): Promise<void> {
+async function handleNewMessages(client: ImapFlow, accountId: string, data: { count?: number; prevCount?: number }): Promise<void> {
   if (!data || typeof data.count !== 'number') return
   const prevCount = typeof data.prevCount === 'number' ? data.prevCount : data.count - 1
   if (data.count <= prevCount) return
@@ -314,7 +338,7 @@ async function handleNewMessages(client: ImapFlow, accountId: string, data: any)
   await refreshCounts(accountId, folder.id)
 }
 
-async function handleFlagChange(accountId: string, data: any): Promise<void> {
+async function handleFlagChange(accountId: string, data: { uid?: number; flags?: Set<string> }): Promise<void> {
   if (!data?.uid) return
   const folder = await prisma.folder.findFirst({ where: { accountId, path: 'INBOX' } })
   if (!folder) return
@@ -350,7 +374,8 @@ export async function fetchBody(messageId: string): Promise<void> {
   const lock = await client.getMailboxLock(msg.folder.path)
   try {
     const rawMsg = await client.fetchOne(String(msg.uid), { source: true }, { uid: true })
-    if (!rawMsg || !(rawMsg as any).source) {
+    const source = rawMsg ? (rawMsg as Record<string, unknown>).source : undefined
+    if (!rawMsg || !source) {
       await prisma.message.update({
         where: { id: messageId },
         data: { bodyFetchedAt: new Date(), textBody: '(mensagem não encontrada no servidor)' }
@@ -358,7 +383,7 @@ export async function fetchBody(messageId: string): Promise<void> {
       return
     }
 
-    const parsed = await simpleParser((rawMsg as any).source)
+    const parsed = await simpleParser(source as Buffer)
 
     await prisma.message.update({
       where: { id: messageId },
