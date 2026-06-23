@@ -18,8 +18,12 @@ export const labelRepository = {
     })
   },
 
-  async countForUser(userId: string) {
-    return prisma.label.count({ where: { userId } })
+  async hasMissingDefaults(userId: string) {
+    const existing = await prisma.label.findMany({
+      where: { userId, name: { in: DEFAULT_LABELS.map(l => l.name) } },
+      select: { name: true },
+    })
+    return existing.length < DEFAULT_LABELS.length
   },
 
   async seedDefaults(userId: string) {
