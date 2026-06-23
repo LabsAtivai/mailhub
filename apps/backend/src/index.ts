@@ -15,6 +15,7 @@ import accountRoutes from './modules/accounts/routes'
 import folderRoutes from './modules/folders/routes'
 import messageRoutes from './modules/messages/routes'
 import labelRoutes from './modules/labels/routes'
+import adminRoutes from './modules/admin/routes'
 
 const app = express()
 app.set('trust proxy', 1)
@@ -64,6 +65,7 @@ app.use('/accounts', accountRoutes)
 app.use('/accounts', folderRoutes)
 app.use('/', messageRoutes)
 app.use('/labels', labelRoutes)
+app.use('/admin', adminRoutes)
 
 // ── Socket.IO auth ──────────────────────────────────────────────────────────
 io.use((socket, next) => {

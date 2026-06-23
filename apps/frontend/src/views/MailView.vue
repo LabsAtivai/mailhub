@@ -74,6 +74,10 @@
       <Divider style="margin:.5rem 0" />
       <button class="add-label-btn" @click="showAddAccount = true">+ Conta IMAP</button>
 
+      <button v-if="auth.isAdmin" class="add-label-btn admin-btn" @click="router.push('/admin')">
+        <i class="pi pi-cog" style="font-size:.8rem"></i> Painel Admin
+      </button>
+
       <div class="socket-status" :class="{ connected: mail.connected }">
         <i class="pi" :class="mail.connected ? 'pi-circle-fill' : 'pi-circle'" style="font-size:.6rem"></i>
         {{ mail.connected ? 'Tempo real' : 'Reconectando...' }}
@@ -636,6 +640,7 @@ async function downloadAttachment(att: Attachment) {
   border-radius: 6px; width: 100%;
 }
 .add-label-btn:hover { background: var(--p-surface-100); }
+.admin-btn { display: flex; align-items: center; gap: .4rem; color: var(--p-orange-600); }
 .socket-status {
   margin-top: auto; display: flex; align-items: center; gap: .35rem;
   font-size: .68rem; color: var(--p-text-muted-color); padding: .4rem .5rem;

@@ -3,11 +3,12 @@ import { ref, computed } from 'vue'
 import { api } from '../services/api'
 import { disconnectSocket } from '../services/socket'
 
-export interface AuthUser { id: string; name: string; email: string }
+export interface AuthUser { id: string; name: string; email: string; role?: string }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
   const isLoggedIn = computed(() => !!user.value)
+  const isAdmin = computed(() => user.value?.role === 'admin')
 
   async function init() {
     const access = localStorage.getItem('access')
@@ -41,5 +42,5 @@ export const useAuthStore = defineStore('auth', () => {
     disconnectSocket()
   }
 
-  return { user, isLoggedIn, init, login, register, logout }
+  return { user, isLoggedIn, isAdmin, init, login, register, logout }
 })

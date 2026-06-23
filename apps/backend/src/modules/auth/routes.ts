@@ -57,7 +57,7 @@ router.post('/register', authLimiter, wrap(async (req: Request, res: Response) =
   })
 
   log.info({ userId: user.id }, 'user registered')
-  res.status(201).json({ access, refresh, user: { id: user.id, name: user.name, email: user.email } })
+  res.status(201).json({ access, refresh, user: { id: user.id, name: user.name, email: user.email, role: 'user' } })
 }))
 
 router.post('/login', authLimiter, wrap(async (req: Request, res: Response) => {
@@ -78,7 +78,7 @@ router.post('/login', authLimiter, wrap(async (req: Request, res: Response) => {
   })
 
   log.info({ userId: user.id }, 'user logged in')
-  res.json({ access, refresh, user: { id: user.id, name: user.name, email: user.email } })
+  res.json({ access, refresh, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
 }))
 
 router.post('/refresh', authLimiter, wrap(async (req: Request, res: Response) => {
@@ -111,7 +111,7 @@ router.post('/logout', requireAuth, wrap(async (req: AuthRequest, res: Response)
 }))
 
 router.get('/me', requireAuth, wrap(async (req: AuthRequest, res: Response) => {
-  const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { id: true, name: true, email: true } })
+  const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { id: true, name: true, email: true, role: true } })
   res.json(user)
 }))
 
