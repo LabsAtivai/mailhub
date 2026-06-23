@@ -8,6 +8,9 @@ const log = scope('messages')
 
 export class ForbiddenError extends Error {}
 export class NotFoundError extends Error {}
+export class SmtpError extends Error {
+  constructor(message: string) { super(message); this.name = 'SmtpError' }
+}
 
 async function requireOwnedMessage(messageId: string, userId: string) {
   const msg = await repo.findMessageWithOwner(messageId)
@@ -142,18 +145,27 @@ export const messageUseCases = {
       })
     }
 
-    const info = await transporter.sendMail({
-      from: `${account.displayName} <${account.emailAddress}>`,
-      to: dto.to.join(', '),
-      cc: dto.cc?.join(', '),
-      subject: dto.subject,
-      html: dto.html,
-      text: dto.text || '',
-      inReplyTo: dto.inReplyTo,
-      references: dto.inReplyTo,
-    })
-
-    transporter.close()
+    let info
+    try {
+      info = await transporter.sendMail({
+        from: `${account.displayName} <${account.emailAddress}>`,
+        to: dto.to.join(', '),
+        cc: dto.cc?.join(', '),
+        subject: dto.subject,
+        html: dto.html,
+        text: dto.text || '',
+        inReplyTo: dto.inReplyTo,
+        references: dto.inReplyTo,
+      })
+    } catch (err: unknown) {
+      const e = err as Record<string, unknown>
+      const code = e?.responseCode ?? e?.code ?? ''
+      const msg = e?.response ?? e?.message ?? 'Falha no envio'
+      log.error({ accountId: account.id, from: account.emailAddress, code, msg: String(msg), via: sgKey ? 'sendgrid' : 'direct' }, 'smtp send failed')
+      throw new SmtpError(String(msg))
+    } finally {
+      transporter.close()
+    }
 
     await redis.publish('mailhub:sent:append', JSON.stringify({
       accountId: account.id, messageId: info.messageId,
