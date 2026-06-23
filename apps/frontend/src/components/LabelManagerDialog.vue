@@ -137,16 +137,19 @@ async function submit() {
 }
 
 function confirmDelete(label: Label) {
+  if (!label?.id) return
+  const labelId = label.id  // captura antes de qualquer re-render
+  const labelName = label.name
   confirm.require({
     group: 'labels',
-    message: `Excluir a etiqueta "${label.name}"? Ela será removida de todas as mensagens.`,
+    message: `Excluir a etiqueta "${labelName}"? Ela será removida de todas as mensagens.`,
     header: 'Confirmar exclusão',
     icon: 'pi pi-trash',
     acceptClass: 'p-button-danger',
     acceptLabel: 'Excluir',
     rejectLabel: 'Cancelar',
     accept: async () => {
-      await labelStore.deleteLabel(label.id)
+      await labelStore.deleteLabel(labelId)
     }
   })
 }
