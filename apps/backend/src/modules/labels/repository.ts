@@ -1,11 +1,31 @@
 import { prisma } from '../../lib/prisma'
 
+const DEFAULT_LABELS = [
+  { name: 'Interessados',     color: '#4CAF50' },
+  { name: 'Apresentação',     color: '#2196F3' },
+  { name: 'Vendido',          color: '#FF9800' },
+  { name: 'Encaminhamentos',  color: '#9C27B0' },
+  { name: 'Nutrição',         color: '#00BCD4' },
+  { name: 'Perdido',          color: '#F44336' },
+]
+
 export const labelRepository = {
   async listForUser(userId: string) {
     return prisma.label.findMany({
       where: { userId },
       orderBy: { name: 'asc' },
       include: { _count: { select: { messages: true } } },
+    })
+  },
+
+  async countForUser(userId: string) {
+    return prisma.label.count({ where: { userId } })
+  },
+
+  async seedDefaults(userId: string) {
+    await prisma.label.createMany({
+      data: DEFAULT_LABELS.map(l => ({ userId, name: l.name, color: l.color })),
+      skipDuplicates: true,
     })
   },
 

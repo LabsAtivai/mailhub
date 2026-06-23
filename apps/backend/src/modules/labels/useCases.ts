@@ -5,7 +5,11 @@ export class ConflictError extends Error {}
 
 export const labelUseCases = {
   async list(userId: string) {
-    const labels = await repo.listForUser(userId)
+    let labels = await repo.listForUser(userId)
+    if (labels.length === 0) {
+      await repo.seedDefaults(userId)
+      labels = await repo.listForUser(userId)
+    }
     return labels.map(l => ({
       id: l.id, name: l.name, color: l.color,
       createdAt: l.createdAt, messageCount: l._count.messages,
