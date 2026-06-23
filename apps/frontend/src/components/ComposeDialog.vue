@@ -1,6 +1,6 @@
 <template>
   <Dialog :visible="visible" @update:visible="$emit('update:visible', $event)"
-    :header="isReply ? 'Responder' : 'Nova mensagem'" modal style="width:600px">
+    :header="isReply ? 'Responder' : isForward ? 'Encaminhar' : 'Nova mensagem'" modal style="width:600px">
 
     <div class="form">
       <div class="field"><label>De</label>
@@ -40,32 +40,57 @@ import { api } from '../services/api'
 import { extractError } from '../services/errorMessage'
 import { useMailStore } from '../stores/mail'
 
-interface ReplyMessage {
+interface ComposeMessage {
   fromEmail?: string | null
   subject?: string | null
   date: string
   textBody?: string | null
+  htmlBody?: string | null
   messageId?: string | null
+  toJson?: string
+  attachments?: Array<{ filename: string; size: number }>
 }
 
-const props = defineProps<{ visible: boolean; replyTo?: ReplyMessage | null }>()
+const props = defineProps<{
+  visible: boolean
+  replyTo?: ComposeMessage | null
+  forwardMsg?: ComposeMessage | null
+}>()
 const emit = defineEmits(['update:visible', 'sent'])
 const mail = useMailStore()
 
 const form = reactive({ accountId: '', to: '', cc: '', subject: '', body: '' })
 const sending = ref(false); const error = ref('')
 const isReply = ref(false)
+const isForward = ref(false)
 
 watch(() => props.replyTo, (msg) => {
   if (!msg) { isReply.value = false; return }
   isReply.value = true
+  isForward.value = false
   form.accountId = mail.selectedAccountId || ''
   form.to = msg.fromEmail || ''
   form.subject = msg.subject?.startsWith('Re:') ? msg.subject : `Re: ${msg.subject || ''}`
   form.body = `\n\n--- Em ${new Date(msg.date).toLocaleString('pt-BR')}, ${msg.fromEmail} escreveu:\n${msg.textBody || ''}`
 })
 
+watch(() => props.forwardMsg, (msg) => {
+  if (!msg) { isForward.value = false; return }
+  isForward.value = true
+  isReply.value = false
+  form.accountId = mail.selectedAccountId || ''
+  form.to = ''
+  form.subject = msg.subject?.startsWith('Fwd:') ? msg.subject : `Fwd: ${msg.subject || ''}`
+  form.body = `\n\n---------- Mensagem encaminhada ----------\nDe: ${msg.fromEmail || ''}\nData: ${new Date(msg.date).toLocaleString('pt-BR')}\nAssunto: ${msg.subject || ''}\n\n${msg.textBody || ''}`
+})
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 async function send() {
+  if (!form.accountId) { error.value = 'Selecione uma conta'; return }
+  if (!form.to.trim()) { error.value = 'Destinatário obrigatório'; return }
   error.value = ''; sending.value = true
   try {
     await api.post('/messages/send', {
@@ -73,9 +98,9 @@ async function send() {
       to: form.to.split(',').map(s => s.trim()).filter(Boolean),
       cc: form.cc ? form.cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       subject: form.subject,
-      html: form.body.replace(/\n/g, '<br>'),
+      html: escapeHtml(form.body).replace(/\n/g, '<br>'),
       text: form.body,
-      inReplyTo: props.replyTo?.messageId,
+      inReplyTo: props.replyTo?.messageId ?? props.forwardMsg?.messageId,
     })
     emit('sent')
     emit('update:visible', false)

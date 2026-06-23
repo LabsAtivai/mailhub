@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import argon2 from 'argon2'
 import { z } from 'zod'
 import rateLimit from 'express-rate-limit'
@@ -10,6 +10,10 @@ import { scope } from '../../lib/logger'
 
 const log = scope('auth')
 const router = Router()
+
+function wrap(fn: (req: AuthRequest, res: Response) => Promise<void>) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => fn(req, res).catch(next)
+}
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -30,7 +34,7 @@ const LoginSchema = z.object({
   password: z.string(),
 })
 
-router.post('/register', authLimiter, async (req: Request, res: Response) => {
+router.post('/register', authLimiter, wrap(async (req: Request, res: Response) => {
   const parsed = RegisterSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
 
@@ -54,9 +58,9 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
   log.info({ userId: user.id }, 'user registered')
   res.status(201).json({ access, refresh, user: { id: user.id, name: user.name, email: user.email } })
-})
+}))
 
-router.post('/login', authLimiter, async (req: Request, res: Response) => {
+router.post('/login', authLimiter, wrap(async (req: Request, res: Response) => {
   const parsed = LoginSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
 
@@ -75,9 +79,9 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
 
   log.info({ userId: user.id }, 'user logged in')
   res.json({ access, refresh, user: { id: user.id, name: user.name, email: user.email } })
-})
+}))
 
-router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
+router.post('/refresh', authLimiter, wrap(async (req: Request, res: Response) => {
   const { refresh } = req.body
   if (!refresh) { res.status(400).json({ error: 'refresh token required' }); return }
 
@@ -98,18 +102,18 @@ router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
   } catch {
     res.status(401).json({ error: 'Invalid refresh token' })
   }
-})
+}))
 
-router.post('/logout', requireAuth, async (req: AuthRequest, res: Response) => {
+router.post('/logout', requireAuth, wrap(async (req: AuthRequest, res: Response) => {
   const { refresh } = req.body
-  if (refresh) await prisma.refreshToken.deleteMany({ where: { token: refresh } })
+  if (refresh) await prisma.refreshToken.deleteMany({ where: { token: refresh, userId: req.userId! } })
   res.json({ ok: true })
-})
+}))
 
-router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/me', requireAuth, wrap(async (req: AuthRequest, res: Response) => {
   const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { id: true, name: true, email: true } })
   res.json(user)
-})
+}))
 
 // Cleanup expired refresh tokens periodically (every 6 hours)
 setInterval(async () => {

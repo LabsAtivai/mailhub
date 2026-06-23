@@ -12,9 +12,8 @@ router.use(requireAuth)
 function handle(res: Response, err: unknown) {
   if (err instanceof NotFoundError) { res.status(404).json({ error: err.message }); return }
   if (err instanceof ConflictError) { res.status(409).json({ error: err.message }); return }
-  const message = err instanceof Error ? err.message : 'Internal server error'
   log.error({ err }, 'unhandled error in labels module')
-  res.status(500).json({ error: message })
+  res.status(500).json({ error: 'Internal server error' })
 }
 
 router.get('/', async (req: AuthRequest, res: Response) => {

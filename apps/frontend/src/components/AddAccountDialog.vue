@@ -32,7 +32,7 @@
         </div>
         <div class="field w80">
           <label>Porta</label>
-          <InputText v-model.number="form.incomingPort" fluid />
+          <InputText :model-value="String(form.incomingPort)" @update:model-value="form.incomingPort = Number($event) || 993" fluid />
         </div>
       </div>
 
@@ -43,7 +43,7 @@
         </div>
         <div class="field w80">
           <label>Porta</label>
-          <InputText v-model.number="form.outgoingPort" fluid />
+          <InputText :model-value="String(form.outgoingPort)" @update:model-value="form.outgoingPort = Number($event) || 465" fluid />
         </div>
       </div>
 

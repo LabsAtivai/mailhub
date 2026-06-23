@@ -35,7 +35,8 @@ export const useAuthStore = defineStore('auth', () => {
   function logout() {
     const refresh = localStorage.getItem('refresh')
     if (refresh) api.post('/auth/logout', { refresh }).catch(() => {})
-    localStorage.clear()
+    localStorage.removeItem('access')
+    localStorage.removeItem('refresh')
     user.value = null
     disconnectSocket()
   }

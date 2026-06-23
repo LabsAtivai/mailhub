@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef } from 'vue'
 import { api } from '../services/api'
-import { getSocket } from '../services/socket'
+import { getSocket, isSocketInitialized, setSocketInitialized } from '../services/socket'
 
 export interface MailAccount {
   id: string; displayName: string; emailAddress: string
@@ -171,7 +171,7 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   // ── label view ─────────────────────────────────────────────────────────────
-  async function loadLabelMessages(labelId: string, items: MessageSummary[], cursor: string | null) {
+  async function loadLabelMessages(_labelId: string, items: MessageSummary[], cursor: string | null) {
     selectedFolderId.value = null
     selectedAccountId.value = null
     selectedMessage.value = null
@@ -182,15 +182,13 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   // ── socket setup — called ONCE with all account IDs ────────────────────────
-  let socketInitialized = false
-
   function setupSocket(accountIds: string[]) {
-    if (socketInitialized) {
+    if (isSocketInitialized()) {
       const socket = getSocket()
       for (const id of accountIds) socket.emit('join:account', id)
       return
     }
-    socketInitialized = true
+    setSocketInitialized(true)
 
     const socket = getSocket()
     connected.value = socket.connected

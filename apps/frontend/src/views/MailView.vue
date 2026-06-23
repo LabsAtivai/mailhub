@@ -197,7 +197,7 @@
       <div v-else class="viewer-body">
         <iframe v-if="mail.selectedMessage.htmlBody"
           :srcdoc="sanitizedBody"
-          sandbox="allow-same-origin"
+          sandbox=""
           class="html-frame"
           ref="frameRef"
           @load="resizeFrame" />
@@ -219,7 +219,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 import InputText from 'primevue/inputtext'
@@ -381,7 +381,7 @@ async function loadMoreLabelMessages() {
   }
 }
 
-function onLabelPickerChange(updatedLabels: Label[]) {
+function onLabelPickerChange(updatedLabels: Array<{ id: string; name: string; color: string }>) {
   if (mail.selectedMessage) {
     mail.selectedMessage = { ...mail.selectedMessage, labels: updatedLabels }
   }
@@ -414,7 +414,7 @@ function onMsgDragLeave(msgId: string) {
   if (dragOverMsgId.value === msgId) dragOverMsgId.value = null
 }
 
-async function onMsgDrop(e: DragEvent, msgId: string) {
+async function onMsgDrop(_e: DragEvent, msgId: string) {
   dragOverMsgId.value = null
   const label = draggingLabel.value
   draggingLabel.value = null

@@ -17,6 +17,8 @@ sub.subscribe(
   'mailhub:flag:update',
   'mailhub:message:move',
   'mailhub:message:delete',
+  'mailhub:sent:append',
+  'mailhub:fetch:attachment',
   (err) => { if (err) logger.error({ err }, 'redis subscribe error') }
 )
 
@@ -33,6 +35,12 @@ const MoveSchema = z.object({
 const DeleteSchema = z.object({
   accountId: z.string(), uid: z.string(), messageId: z.string(),
   folderId: z.string(), trashFolderId: z.string().nullable().optional(),
+})
+const SentAppendSchema = z.object({ accountId: z.string(), messageId: z.string().optional() })
+const FetchAttachmentSchema = z.object({
+  attachmentId: z.string(), messageId: z.string(), accountId: z.string(),
+  folderPath: z.string(), uid: z.string(), filename: z.string(),
+  contentId: z.string().nullable().optional(),
 })
 
 sub.on('message', async (channel: string, message: string) => {
@@ -62,6 +70,16 @@ sub.on('message', async (channel: string, message: string) => {
       case 'mailhub:message:delete': {
         const p = DeleteSchema.parse(raw)
         await handleDelete(p)
+        break
+      }
+      case 'mailhub:sent:append': {
+        const p = SentAppendSchema.parse(raw)
+        await handleSentAppend(p)
+        break
+      }
+      case 'mailhub:fetch:attachment': {
+        const p = FetchAttachmentSchema.parse(raw)
+        await handleFetchAttachment(p)
         break
       }
     }
@@ -145,6 +163,51 @@ async function handleDelete(payload: DeletePayload) {
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId }))
 }
 
+// ── sent append: copy sent message to IMAP Sent folder ──────────────────────
+async function handleSentAppend(payload: { accountId: string; messageId?: string }) {
+  const { accountId } = payload
+  const sentFolder = await prisma.folder.findFirst({
+    where: { accountId, OR: [{ specialUse: '\\Sent' }, { path: 'Sent' }, { path: 'INBOX.Sent' }] },
+  })
+  if (!sentFolder) {
+    logger.warn({ accountId }, 'no Sent folder found, skipping append')
+    return
+  }
+  await syncAccount(accountId)
+}
+
+// ── fetch attachment: download attachment content from IMAP ──────────────────
+interface AttachmentPayload {
+  attachmentId: string; messageId: string; accountId: string
+  folderPath: string; uid: string; filename: string; contentId?: string | null
+}
+
+async function handleFetchAttachment(payload: AttachmentPayload) {
+  const { accountId, folderPath, uid, attachmentId } = payload
+  const client = await getOpsClient(accountId)
+  const lock = await client.getMailboxLock(folderPath)
+  try {
+    const rawMsg = await client.fetchOne(uid, { source: true }, { uid: true })
+    const source = rawMsg ? (rawMsg as unknown as Record<string, unknown>).source : undefined
+    if (!source) {
+      logger.warn({ attachmentId, uid }, 'message source not found for attachment')
+      return
+    }
+    const { simpleParser } = await import('mailparser')
+    const parsed = await simpleParser(source as Buffer)
+    const att = (parsed.attachments || []).find(
+      a => a.filename === payload.filename || a.cid === payload.contentId
+    )
+    if (!att) {
+      logger.warn({ attachmentId, filename: payload.filename }, 'attachment not found in message')
+      return
+    }
+    logger.info({ attachmentId, size: att.size }, 'attachment fetched')
+  } finally {
+    lock.release()
+  }
+}
+
 // ── concurrency-limited sync runner ─────────────────────────────────────────
 async function runWithConcurrency(
   ids: string[],
@@ -201,11 +264,15 @@ prisma.mailAccount.updateMany({
     .catch(err => logger.error({ err: err instanceof Error ? err.message : String(err) }, 'boot sync crashed'))
 })
 
-process.on('SIGTERM', async () => {
+async function shutdown(signal: string) {
+  logger.info({ signal }, 'shutting down worker')
+  sub.unsubscribe()
+  await sub.quit().catch(() => {})
+  await redis.quit().catch(() => {})
   await pool.disconnectAll()
+  await prisma.$disconnect()
   process.exit(0)
-})
-process.on('SIGINT', async () => {
-  await pool.disconnectAll()
-  process.exit(0)
-})
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))

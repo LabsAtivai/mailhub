@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+.env.*
+*.csv
+seed-*.js
+scan-*.js

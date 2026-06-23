@@ -1,4 +1,4 @@
-import { Router, Response } from 'express'
+import { Router, Response, NextFunction } from 'express'
 import { z } from 'zod'
 import net from 'net'
 import dns from 'dns/promises'
@@ -11,6 +11,10 @@ import { scope } from '../../lib/logger'
 const log = scope('accounts')
 const router = Router()
 router.use(requireAuth)
+
+function wrap(fn: (req: AuthRequest, res: Response) => Promise<void>) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => fn(req, res).catch(next)
+}
 
 const AccountSchema = z.object({
   displayName: z.string().min(1),
@@ -58,7 +62,7 @@ async function isPrivateHost(host: string): Promise<boolean> {
 }
 
 // GET /accounts
-router.get('/', async (req: AuthRequest, res: Response) => {
+router.get('/', wrap(async (req: AuthRequest, res: Response) => {
   const accounts = await prisma.mailAccount.findMany({
     where: { userId: req.userId! },
     select: {
@@ -70,10 +74,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     }
   })
   res.json(accounts)
-})
+}))
 
 // POST /accounts/test
-router.post('/test', async (req: AuthRequest, res: Response) => {
+router.post('/test', wrap(async (req: AuthRequest, res: Response) => {
   const parsed = AccountSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   const d = parsed.data
@@ -97,15 +101,15 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     await client.logout()
     res.json({ ok: true })
   } catch (e: unknown) {
-    client.close().catch(() => {})
+    try { client.close() } catch {}
     const err = e as Record<string, unknown>
     const detail = err?.responseText ?? err?.serverResponseCode ?? (e instanceof Error ? e.message : 'Falha na conexão')
     res.status(400).json({ error: String(detail) })
   }
-})
+}))
 
 // POST /accounts
-router.post('/', async (req: AuthRequest, res: Response) => {
+router.post('/', wrap(async (req: AuthRequest, res: Response) => {
   const parsed = AccountSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   const d = parsed.data
@@ -136,10 +140,10 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     id: account.id, displayName: account.displayName,
     emailAddress: account.emailAddress, syncState: account.syncState, createdAt: account.createdAt
   })
-})
+}))
 
 // PATCH /accounts/:id
-router.patch('/:id', async (req: AuthRequest, res: Response) => {
+router.patch('/:id', wrap(async (req: AuthRequest, res: Response) => {
   const account = await prisma.mailAccount.findFirst({ where: { id: req.params.id, userId: req.userId! } })
   if (!account) { res.status(404).json({ error: 'Not found' }); return }
 
@@ -165,8 +169,9 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Host inválido' }); return
   }
 
-  const { password, ...rest } = parsed.data
+  const { password, syncEnabled, ...rest } = parsed.data
   const data: Record<string, unknown> = { ...rest }
+  if (typeof syncEnabled === 'boolean') data.syncEnabled = syncEnabled
   if (password) data.encryptedPassword = encrypt(password)
 
   const updated = await prisma.mailAccount.update({
@@ -174,23 +179,23 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
     select: { id: true, displayName: true, emailAddress: true, syncState: true }
   })
   res.json(updated)
-})
+}))
 
 // POST /accounts/:id/sync
-router.post('/:id/sync', async (req: AuthRequest, res: Response) => {
+router.post('/:id/sync', wrap(async (req: AuthRequest, res: Response) => {
   const account = await prisma.mailAccount.findFirst({ where: { id: req.params.id, userId: req.userId! } })
   if (!account) { res.status(404).json({ error: 'Not found' }); return }
   await redis.publish('mailhub:sync:start', JSON.stringify({ accountId: account.id }))
   res.json({ ok: true })
-})
+}))
 
 // DELETE /accounts/:id
-router.delete('/:id', async (req: AuthRequest, res: Response) => {
+router.delete('/:id', wrap(async (req: AuthRequest, res: Response) => {
   const account = await prisma.mailAccount.findFirst({ where: { id: req.params.id, userId: req.userId! } })
   if (!account) { res.status(404).json({ error: 'Not found' }); return }
   await prisma.mailAccount.delete({ where: { id: account.id } })
   log.info({ userId: req.userId, accountId: account.id }, 'account deleted')
   res.json({ ok: true })
-})
+}))
 
 export default router

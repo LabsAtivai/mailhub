@@ -5,7 +5,8 @@
     "allowImportingTsExtensions": true, "resolveJsonModule": true,
     "isolatedModules": true, "noEmit": true, "jsx": "preserve",
     "strict": true, "noUnusedLocals": true, "noUnusedParameters": true,
-    "baseUrl": ".", "paths": { "@/*": ["./src/*"] }
+    "baseUrl": ".", "paths": { "@/*": ["./src/*"] },
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"]
 }

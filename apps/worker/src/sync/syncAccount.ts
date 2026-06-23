@@ -32,7 +32,7 @@ function imapOptions(account: ImapAccount): ImapFlowOptions {
     secure: account.tlsMode === 'TLS',
     auth: { user: account.username, pass: decrypt(account.encryptedPassword) },
   }
-  if (IMAP_PROXY) (opts as Record<string, unknown>).proxy = IMAP_PROXY
+  if (IMAP_PROXY) (opts as unknown as Record<string, unknown>).proxy = IMAP_PROXY
   return opts
 }
 
@@ -48,9 +48,12 @@ export async function getOpsClient(accountId: string): Promise<ImapFlow> {
 export async function syncAccount(accountId: string): Promise<void> {
   const account = await prisma.mailAccount.findUnique({ where: { id: accountId } })
   if (!account || !account.syncEnabled) return
-  if (account.syncState === 'SYNCING') return
 
-  await prisma.mailAccount.update({ where: { id: accountId }, data: { syncState: 'SYNCING' } })
+  const { count } = await prisma.mailAccount.updateMany({
+    where: { id: accountId, syncState: { not: 'SYNCING' } },
+    data: { syncState: 'SYNCING' },
+  })
+  if (count === 0) return
   await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'SYNCING', progress: 0 }))
 
   try {
@@ -138,7 +141,7 @@ async function syncMessages(
     }
 
     if (!isFirstSync) {
-      const recent = new Date(Date.now() - 7 * 864e5)
+      const recent = new Date(Date.now() - SYNC_DAYS * 864e5)
       const flagUpdates: Array<{ uid: bigint; isRead: boolean; isFlagged: boolean; isAnswered: boolean }> = []
       for await (const msg of client.fetch({ since: recent }, { uid: true, flags: true })) {
         const flags: Set<string> = msg.flags ?? new Set()
@@ -294,6 +297,7 @@ async function refreshCounts(accountId: string, folderId: string): Promise<void>
 
 // ── IMAP IDLE ────────────────────────────────────────────────────────────────
 const idleStarted = new Set<string>()
+const idleRetries = new Map<string, number>()
 
 export async function ensureIdle(accountId: string): Promise<void> {
   if (idleStarted.has(accountId) && pool.get(accountId, 'idle')) return
@@ -304,6 +308,7 @@ export async function ensureIdle(accountId: string): Promise<void> {
 
   const client = await pool.connect(accountId, 'idle', imapOptions(account as ImapAccount))
   idleStarted.add(accountId)
+  idleRetries.delete(accountId)
 
   await client.mailboxOpen('INBOX')
   log.info({ accountId, email: account.emailAddress }, 'IDLE watching INBOX')
@@ -320,9 +325,17 @@ export async function ensureIdle(accountId: string): Promise<void> {
 
   client.on('close', () => {
     idleStarted.delete(accountId)
-    log.warn({ accountId }, 'IDLE closed, reconnecting in 30s')
+    const retries = idleRetries.get(accountId) ?? 0
+    if (retries >= 10) {
+      log.error({ accountId, retries }, 'IDLE max retries reached, giving up')
+      idleRetries.delete(accountId)
+      return
+    }
+    idleRetries.set(accountId, retries + 1)
+    const delay = Math.min(30_000 * Math.pow(2, retries), 300_000)
+    log.warn({ accountId, retries: retries + 1, delayMs: delay }, 'IDLE closed, reconnecting')
     setTimeout(() => ensureIdle(accountId).catch(e =>
-      log.error({ accountId, err: e instanceof Error ? e.message : String(e) }, 'idle reconnect failed')), 30_000)
+      log.error({ accountId, err: e instanceof Error ? e.message : String(e) }, 'idle reconnect failed')), delay)
   })
 }
 
@@ -334,8 +347,14 @@ async function handleNewMessages(client: ImapFlow, accountId: string, data: { co
   const folder = await prisma.folder.findFirst({ where: { accountId, path: 'INBOX' } })
   if (!folder) return
 
-  const seqRange = `${prevCount + 1}:${data.count}`
-  await batchFetchAndUpsert(client, accountId, folder.id, seqRange, true)
+  const storedUidNext = folder.uidNext ?? BigInt(1)
+  await batchFetchAndUpsert(client, accountId, folder.id, `${storedUidNext}:*`, true, { uid: true })
+
+  const mailbox = client.mailbox as MailboxInfo | undefined
+  const newUidNext = BigInt(mailbox?.uidNext ?? storedUidNext)
+  if (newUidNext > storedUidNext) {
+    await prisma.folder.update({ where: { id: folder.id }, data: { uidNext: newUidNext } })
+  }
   await refreshCounts(accountId, folder.id)
 }
 
@@ -400,8 +419,8 @@ export async function fetchBody(messageId: string): Promise<void> {
 
     if ((parsed.attachments || []).length > 0) {
       await prisma.attachment.createMany({
-        data: (parsed.attachments || []).map(att => ({
-          id: `${messageId}-${att.checksum || Math.random().toString(36).slice(2)}`,
+        data: (parsed.attachments || []).map((att, idx) => ({
+          id: `${messageId}-${att.checksum || idx}`,
           messageId,
           filename: att.filename || 'sem-nome',
           mimeType: att.contentType || 'application/octet-stream',

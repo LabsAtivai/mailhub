@@ -47,7 +47,15 @@ app.use(express.json({ limit: '26mb' }))
 app.use(cookieParser())
 
 // ── healthcheck (antes das rotas autenticadas) ──────────────────────────────
-app.get('/health', (_req, res) => res.json({ ok: true }))
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    await redis.ping()
+    res.json({ ok: true })
+  } catch {
+    res.status(503).json({ ok: false })
+  }
+})
 
 // ── routes ──────────────────────────────────────────────────────────────────
 app.use('/auth', authRoutes)
@@ -110,5 +118,26 @@ redisSub.on('message', (channel: string, message: string) => {
   }
 })
 
+// ── global error handler ────────────────────────────────────────────────────
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error({ err }, 'unhandled route error')
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 const PORT = process.env.PORT || 3001
 server.listen(PORT, () => logger.info({ port: PORT }, 'mailhub-backend listening'))
+
+// ── graceful shutdown ───────────────────────────────────────────────────────
+async function shutdown(signal: string) {
+  logger.info({ signal }, 'shutting down')
+  server.close()
+  redisSub.disconnect()
+  redis.disconnect()
+  await prisma.$disconnect()
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))

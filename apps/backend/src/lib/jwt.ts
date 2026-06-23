@@ -23,10 +23,17 @@ export function signRefresh(payload: JwtPayload): string {
   return jwt.sign(payload, REFRESH_SECRET, { expiresIn: '7d' })
 }
 
+function validatePayload(decoded: string | jwt.JwtPayload): JwtPayload {
+  if (typeof decoded === 'string' || !decoded.userId || !decoded.email) {
+    throw new Error('Invalid token payload')
+  }
+  return { userId: decoded.userId as string, email: decoded.email as string }
+}
+
 export function verifyAccess(token: string): JwtPayload {
-  return jwt.verify(token, ACCESS_SECRET) as unknown as JwtPayload
+  return validatePayload(jwt.verify(token, ACCESS_SECRET))
 }
 
 export function verifyRefresh(token: string): JwtPayload {
-  return jwt.verify(token, REFRESH_SECRET) as unknown as JwtPayload
+  return validatePayload(jwt.verify(token, REFRESH_SECRET))
 }

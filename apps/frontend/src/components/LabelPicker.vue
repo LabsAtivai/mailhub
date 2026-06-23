@@ -48,11 +48,13 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import { useLabelStore, type Label } from '../stores/labels'
+import { useLabelStore } from '../stores/labels'
+
+interface LabelRef { id: string; name: string; color: string }
 
 const props = defineProps<{
   messageId: string
-  initialLabels: Label[]
+  initialLabels: LabelRef[]
 }>()
 const emit = defineEmits(['manage', 'change'])
 
@@ -60,7 +62,7 @@ const labelStore = useLabelStore()
 
 const open = ref(false)
 const search = ref('')
-const assigned = ref<Label[]>([...props.initialLabels])
+const assigned = ref<LabelRef[]>([...props.initialLabels])
 const rootRef = ref<HTMLElement | null>(null)
 const dropRef = ref<HTMLElement | null>(null)
 const dropdownStyle = ref({})
@@ -77,7 +79,7 @@ function isAssigned(labelId: string) {
   return assigned.value.some(l => l.id === labelId)
 }
 
-async function toggle_(label: Label) {
+async function toggle_(label: LabelRef) {
   const wasAssigned = isAssigned(label.id)
   const prev = [...assigned.value]
   // optimistic update

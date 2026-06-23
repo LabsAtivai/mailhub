@@ -1,4 +1,5 @@
 import { Router, Response } from 'express'
+import rateLimit from 'express-rate-limit'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
 import { messageUseCases as uc, NotFoundError, ForbiddenError } from './useCases'
 import { SetFlagsSchema, MoveMessageSchema, SendMailSchema, AssignLabelSchema } from './dto'
@@ -8,12 +9,20 @@ const log = scope('messages')
 const router = Router()
 router.use(requireAuth)
 
+const sendLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthRequest).userId || req.ip || 'unknown',
+  message: { error: 'Limite de envios atingido (50/hora)' },
+})
+
 function handle(res: Response, err: unknown) {
   if (err instanceof NotFoundError) { res.status(404).json({ error: err.message }); return }
   if (err instanceof ForbiddenError) { res.status(403).json({ error: err.message }); return }
-  const message = err instanceof Error ? err.message : 'Internal server error'
   log.error({ err }, 'unhandled error in messages module')
-  res.status(500).json({ error: message })
+  res.status(500).json({ error: 'Internal server error' })
 }
 
 // GET /folders/:folderId/messages
@@ -68,7 +77,7 @@ router.delete('/messages/:id', async (req: AuthRequest, res: Response) => {
 })
 
 // POST /messages/send
-router.post('/messages/send', async (req: AuthRequest, res: Response) => {
+router.post('/messages/send', sendLimiter, async (req: AuthRequest, res: Response) => {
   const parsed = SendMailSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   try {

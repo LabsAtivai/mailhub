@@ -45,6 +45,8 @@ export const useLabelStore = defineStore('labels', () => {
       if (Array.isArray(data)) {
         labels.value = sortLabels(data.map(toLabel))
       }
+    } catch {
+      labels.value = []
     } finally {
       loading.value = false
     }
