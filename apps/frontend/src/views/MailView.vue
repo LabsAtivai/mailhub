@@ -360,8 +360,8 @@ function onSearchInput() {
 }
 function doSearch() { if (searchInput.value) mail.search(searchInput.value) }
 
-async function selectLabel(labelId: string) {
-  if (!labelId) return
+async function selectLabel(labelId: string | undefined | null) {
+  if (!labelId || labelId === 'undefined') return
   activeLabelId.value = labelId
   searchInput.value = ''
   mail.selectedMessage = null

@@ -101,7 +101,8 @@ export const useLabelStore = defineStore('labels', () => {
     }
   }
 
-  async function fetchLabelMessages(labelId: string, cursor?: string) {
+  async function fetchLabelMessages(labelId: string | null | undefined, cursor?: string) {
+    if (!labelId || labelId === 'undefined') throw new Error('labelId inválido')
     const params: Record<string, string | number> = { limit: 50 }
     if (cursor) params.cursor = cursor
     const { data } = await api.get(`/labels/${labelId}/messages`, { params })
