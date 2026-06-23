@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer'
 import { messageRepository as repo } from './repository'
-import { decrypt } from '../../lib/crypto'
 import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
 
@@ -126,24 +125,14 @@ export const messageUseCases = {
     if (!account) throw new NotFoundError('Conta não encontrada')
 
     const sgKey = process.env.SENDGRID_API_KEY
-    let transporter: nodemailer.Transporter
+    if (!sgKey) throw new SmtpError('SENDGRID_API_KEY não configurada no servidor')
 
-    if (sgKey) {
-      transporter = nodemailer.createTransport({
-        host: 'smtp.sendgrid.net',
-        port: 587,
-        secure: false,
-        auth: { user: 'apikey', pass: sgKey },
-      })
-    } else {
-      const password = decrypt(account.encryptedPassword)
-      transporter = nodemailer.createTransport({
-        host: account.outgoingHost,
-        port: account.outgoingPort,
-        secure: account.outgoingPort === 465,
-        auth: { user: account.username, pass: password },
-      })
-    }
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.sendgrid.net',
+      port: 587,
+      secure: false,
+      auth: { user: 'apikey', pass: sgKey },
+    })
 
     let info
     try {
@@ -161,7 +150,7 @@ export const messageUseCases = {
       const e = err as Record<string, unknown>
       const code = e?.responseCode ?? e?.code ?? ''
       const msg = e?.response ?? e?.message ?? 'Falha no envio'
-      log.error({ accountId: account.id, from: account.emailAddress, code, msg: String(msg), via: sgKey ? 'sendgrid' : 'direct' }, 'smtp send failed')
+      log.error({ accountId: account.id, from: account.emailAddress, code, msg: String(msg) }, 'sendgrid send failed')
       throw new SmtpError(String(msg))
     } finally {
       transporter.close()
@@ -170,7 +159,7 @@ export const messageUseCases = {
     await redis.publish('mailhub:sent:append', JSON.stringify({
       accountId: account.id, messageId: info.messageId,
     }))
-    log.info({ accountId: account.id, to: dto.to.length, via: sgKey ? 'sendgrid' : 'direct' }, 'message sent')
+    log.info({ accountId: account.id, to: dto.to.length }, 'message sent via sendgrid')
     return { messageId: info.messageId }
   },
 
