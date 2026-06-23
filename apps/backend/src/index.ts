@@ -17,6 +17,7 @@ import messageRoutes from './modules/messages/routes'
 import labelRoutes from './modules/labels/routes'
 
 const app = express()
+app.set('trust proxy', 1)
 const server = http.createServer(app)
 
 const io = new SocketServer(server, {
