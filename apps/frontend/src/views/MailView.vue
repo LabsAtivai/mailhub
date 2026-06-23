@@ -161,13 +161,16 @@
       <div class="viewer-subject">{{ mail.selectedMessage.subject || '(sem assunto)' }}</div>
 
       <div class="viewer-meta">
-        <span class="viewer-from">
-          <b>{{ mail.selectedMessage.fromName || mail.selectedMessage.fromEmail }}</b>
-          <span v-if="mail.selectedMessage.fromName" class="from-addr">&lt;{{ mail.selectedMessage.fromEmail }}&gt;</span>
-        </span>
+        <div class="sender-avatar">{{ senderInitial }}</div>
+        <div class="sender-info">
+          <div class="sender-line">
+            <b>{{ mail.selectedMessage.fromName || mail.selectedMessage.fromEmail }}</b>
+            <span v-if="mail.selectedMessage.fromName" class="from-addr">&lt;{{ mail.selectedMessage.fromEmail }}&gt;</span>
+          </div>
+          <div class="viewer-to">Para: {{ formatAddresses(mail.selectedMessage.toJson) }}</div>
+        </div>
         <span class="viewer-date">{{ formatDateFull(mail.selectedMessage.date) }}</span>
       </div>
-      <div class="viewer-to">Para: {{ formatAddresses(mail.selectedMessage.toJson) }}</div>
 
       <!-- label chips -->
       <div v-if="(mail.selectedMessage.labels ?? []).length > 0" class="viewer-labels">
@@ -195,13 +198,20 @@
         <i class="pi pi-spin pi-spinner"></i> Carregando...
       </div>
       <div v-else class="viewer-body">
+        <!-- remote images banner -->
+        <div v-if="mail.selectedMessage.htmlBody && !showRemoteImages" class="images-banner">
+          <i class="pi pi-image"></i>
+          <span>Imagens externas bloqueadas para sua segurança.</span>
+          <button class="show-images-btn" @click="showRemoteImages = true">Exibir imagens</button>
+        </div>
+
         <iframe v-if="mail.selectedMessage.htmlBody"
-          :srcdoc="sanitizedBody"
-          sandbox=""
+          :srcdoc="styledBody"
+          sandbox="allow-same-origin"
           class="html-frame"
           ref="frameRef"
           @load="resizeFrame" />
-        <pre v-else-if="mail.selectedMessage.textBody" class="text-body">{{ mail.selectedMessage.textBody }}</pre>
+        <div v-else-if="mail.selectedMessage.textBody" class="text-body" v-html="renderTextBody(mail.selectedMessage.textBody)"></div>
         <div v-else class="no-body">Corpo não disponível.</div>
       </div>
     </section>
@@ -219,7 +229,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 import InputText from 'primevue/inputtext'
@@ -247,6 +257,11 @@ const showLabelManager = ref(false)
 const replyTo = ref<MessageDetail | null>(null)
 const forwardMsg = ref<MessageDetail | null>(null)
 const frameRef = ref<HTMLIFrameElement | null>(null)
+const showRemoteImages = ref(false)
+
+watch(() => mail.selectedMessage?.id, () => {
+  showRemoteImages.value = false
+})
 const searchInput = ref('')
 const activeLabelId = ref<string | null>(null)
 const expandedAccounts = ref(new Set<string>())
@@ -260,15 +275,79 @@ onMounted(async () => {
   mail.accounts.forEach(acc => expandedAccounts.value.add(acc.id))
 })
 
-// Memoize sanitized HTML — only recompute when message changes
+const EMAIL_BASE_CSS = `
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14px; line-height: 1.6; color: #1a1a1a;
+    word-wrap: break-word; overflow-wrap: break-word;
+    -webkit-text-size-adjust: 100%;
+  }
+  body { padding: 4px 0; }
+  img { max-width: 100%; height: auto; }
+  table { max-width: 100%; }
+  a { color: #1a73e8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  blockquote {
+    margin: 8px 0; padding: 4px 12px;
+    border-left: 3px solid #dadce0; color: #5f6368;
+  }
+  pre, code {
+    font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    font-size: 13px; background: #f8f9fa; border-radius: 4px;
+  }
+  pre { padding: 12px; overflow-x: auto; }
+  code { padding: 2px 4px; }
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 16px 0; }
+  p { margin: 0 0 8px; }
+  h1, h2, h3, h4, h5, h6 { margin: 16px 0 8px; line-height: 1.3; }
+</style>`
+
 const sanitizedBody = computed(() => {
   const html = mail.selectedMessage?.htmlBody
   if (!html) return ''
-  return DOMPurify.sanitize(html, {
+  const cfg: Record<string, unknown> = {
     FORBID_TAGS: ['script', 'iframe', 'form', 'input', 'object', 'embed'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
-  })
+  }
+  if (!showRemoteImages.value) {
+    DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+      if (data.attrName === 'src' && node.tagName === 'IMG') {
+        const val = data.attrValue
+        if (val && (val.startsWith('http:') || val.startsWith('https:'))) {
+          data.attrValue = ''
+          node.setAttribute('data-blocked-src', val)
+          node.setAttribute('alt', node.getAttribute('alt') || '[imagem bloqueada]')
+        }
+      }
+    })
+  }
+  const clean = DOMPurify.sanitize(html, cfg)
+  DOMPurify.removeAllHooks()
+  return clean
 })
+
+const styledBody = computed(() => {
+  if (!sanitizedBody.value) return ''
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${EMAIL_BASE_CSS}</head><body>${sanitizedBody.value}</body></html>`
+})
+
+function renderTextBody(text: string): string {
+  const escaped = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const withLinks = escaped.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+  )
+  const withEmails = withLinks.replace(
+    /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
+    '<a href="mailto:$1">$1</a>'
+  )
+  return withEmails.replace(/\n/g, '<br>')
+}
 
 const displayMessages = computed(() =>
   searchInput.value ? mail.searchResults : mail.messages
@@ -289,6 +368,11 @@ const listTitle = computed(() => {
 const visibleAttachments = computed(() =>
   (mail.selectedMessage?.attachments ?? []).filter(a => !a.isInline)
 )
+
+const senderInitial = computed(() => {
+  const name = mail.selectedMessage?.fromName || mail.selectedMessage?.fromEmail || '?'
+  return name.charAt(0).toUpperCase()
+})
 
 function toggleAccount(id: string) {
   if (expandedAccounts.value.has(id)) expandedAccounts.value.delete(id)
@@ -335,8 +419,30 @@ function formatSize(bytes: number): string {
 
 function resizeFrame() {
   nextTick(() => {
-    if (!frameRef.value?.contentDocument?.body) return
-    frameRef.value.style.height = frameRef.value.contentDocument.documentElement.scrollHeight + 32 + 'px'
+    const iframe = frameRef.value
+    if (!iframe?.contentDocument?.body) return
+    const doc = iframe.contentDocument
+    const h = Math.max(
+      doc.body.scrollHeight,
+      doc.documentElement.scrollHeight,
+      doc.body.offsetHeight,
+      200
+    )
+    iframe.style.height = h + 16 + 'px'
+
+    const images = doc.querySelectorAll('img')
+    if (images.length > 0) {
+      let loaded = 0
+      images.forEach(img => {
+        if (img.complete) return
+        img.addEventListener('load', () => {
+          loaded++
+          if (loaded >= images.length) {
+            iframe.style.height = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 200) + 16 + 'px'
+          }
+        }, { once: true })
+      })
+    }
   })
 }
 
@@ -595,12 +701,22 @@ async function downloadAttachment(att: Attachment) {
 }
 .viewer-actions { display: flex; align-items: center; gap: .1rem; }
 .star-active i { color: #F59E0B; }
-.viewer-subject { font-size: 1.1rem; font-weight: 600; padding: .65rem 1rem .2rem; flex-shrink: 0; }
-.viewer-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0 1rem .15rem; flex-shrink: 0; }
-.viewer-from { font-size: .84rem; }
-.from-addr { color: var(--p-text-muted-color); font-size: .78rem; margin-left: .3rem; }
-.viewer-date { font-size: .74rem; color: var(--p-text-muted-color); white-space: nowrap; }
-.viewer-to { padding: 0 1rem .25rem; font-size: .78rem; color: var(--p-text-muted-color); flex-shrink: 0; }
+.viewer-subject { font-size: 1.15rem; font-weight: 600; padding: .65rem 1rem .35rem; flex-shrink: 0; line-height: 1.35; }
+.viewer-meta {
+  display: flex; align-items: flex-start; gap: .65rem;
+  padding: .2rem 1rem .35rem; flex-shrink: 0;
+}
+.sender-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  background: var(--p-primary-100); color: var(--p-primary-600);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .9rem; margin-top: 1px;
+}
+.sender-info { flex: 1; min-width: 0; }
+.sender-line { font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.from-addr { color: var(--p-text-muted-color); font-size: .76rem; margin-left: .3rem; }
+.viewer-date { font-size: .72rem; color: var(--p-text-muted-color); white-space: nowrap; margin-top: 2px; }
+.viewer-to { font-size: .76rem; color: var(--p-text-muted-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-labels { display: flex; flex-wrap: wrap; gap: .3rem; padding: 0 1rem .4rem; flex-shrink: 0; }
 .label-chip {
   display: inline-flex; align-items: center; gap: .25rem;
@@ -612,15 +728,43 @@ async function downloadAttachment(att: Attachment) {
   padding: .35rem 1rem; border-bottom: 1px solid var(--p-surface-100); flex-shrink: 0;
 }
 .att-chip {
-  display: inline-flex; align-items: center; gap: .3rem;
-  background: var(--p-surface-100); border-radius: 6px; padding: .2rem .5rem;
-  font-size: .78rem; max-width: 260px;
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: var(--p-surface-50); border: 1px solid var(--p-surface-200);
+  border-radius: 8px; padding: .3rem .6rem;
+  font-size: .78rem; max-width: 280px; transition: background .1s;
 }
-.att-size { color: var(--p-text-muted-color); white-space: nowrap; }
-.body-loading { display: flex; align-items: center; gap: .5rem; padding: 1.5rem 1rem; color: var(--p-text-muted-color); font-size: .85rem; }
+.att-chip:hover { background: var(--p-surface-100); }
+.att-size { color: var(--p-text-muted-color); white-space: nowrap; font-size: .7rem; }
+.body-loading {
+  display: flex; align-items: center; gap: .5rem;
+  padding: 1.5rem 1rem; color: var(--p-text-muted-color); font-size: .85rem;
+}
 .viewer-body { flex: 1; overflow-y: auto; padding: .5rem 1rem 1.5rem; }
-.html-frame { width: 100%; border: none; min-height: 200px; display: block; }
-.text-body { white-space: pre-wrap; font-size: .875rem; line-height: 1.65; font-family: inherit; margin: 0; }
+
+.images-banner {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .45rem .8rem; margin-bottom: .5rem;
+  background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px;
+  font-size: .78rem; color: #5d4037;
+}
+.images-banner i { font-size: .85rem; color: #f9a825; }
+.show-images-btn {
+  background: none; border: none; cursor: pointer;
+  color: #1a73e8; font-weight: 600; font-size: .78rem;
+  padding: 0; margin-left: .3rem;
+}
+.show-images-btn:hover { text-decoration: underline; }
+
+.html-frame {
+  width: 100%; border: none; min-height: 200px; display: block;
+  border-radius: 4px; background: #fff;
+}
+.text-body {
+  font-size: .875rem; line-height: 1.7; font-family: inherit;
+  margin: 0; color: #1a1a1a; word-wrap: break-word; overflow-wrap: break-word;
+}
+.text-body :deep(a) { color: #1a73e8; text-decoration: none; }
+.text-body :deep(a:hover) { text-decoration: underline; }
 .no-body { color: var(--p-text-muted-color); font-size: .875rem; padding: 1rem 0; }
 
 /* ── responsive ────────────────────────────────────────────────────────────── */
