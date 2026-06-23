@@ -72,6 +72,7 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: ${PORT}
       NODE_ENV: ${NODE_ENV}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 30s

@@ -122,13 +122,25 @@ export const messageUseCases = {
     const account = await repo.findAccountForUser(dto.accountId, userId)
     if (!account) throw new NotFoundError('Conta não encontrada')
 
-    const password = decrypt(account.encryptedPassword)
-    const transporter = nodemailer.createTransport({
-      host: account.outgoingHost,
-      port: account.outgoingPort,
-      secure: account.outgoingPort === 465,
-      auth: { user: account.username, pass: password },
-    })
+    const sgKey = process.env.SENDGRID_API_KEY
+    let transporter: nodemailer.Transporter
+
+    if (sgKey) {
+      transporter = nodemailer.createTransport({
+        host: 'smtp.sendgrid.net',
+        port: 587,
+        secure: false,
+        auth: { user: 'apikey', pass: sgKey },
+      })
+    } else {
+      const password = decrypt(account.encryptedPassword)
+      transporter = nodemailer.createTransport({
+        host: account.outgoingHost,
+        port: account.outgoingPort,
+        secure: account.outgoingPort === 465,
+        auth: { user: account.username, pass: password },
+      })
+    }
 
     const info = await transporter.sendMail({
       from: `${account.displayName} <${account.emailAddress}>`,
@@ -146,7 +158,7 @@ export const messageUseCases = {
     await redis.publish('mailhub:sent:append', JSON.stringify({
       accountId: account.id, messageId: info.messageId,
     }))
-    log.info({ accountId: account.id, to: dto.to.length }, 'message sent')
+    log.info({ accountId: account.id, to: dto.to.length, via: sgKey ? 'sendgrid' : 'direct' }, 'message sent')
     return { messageId: info.messageId }
   },
 
