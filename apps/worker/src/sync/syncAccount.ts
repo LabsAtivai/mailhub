@@ -93,10 +93,16 @@ export async function syncAccount(accountId: string): Promise<void> {
   } catch (err: unknown) {
     const e = err as Record<string, unknown>
     const errMsg = e?.responseText ?? e?.serverResponseCode ?? (err instanceof Error ? err.message : String(err))
-    log.error({ accountId, err: String(errMsg), code: e?.serverResponseCode }, 'sync failed')
+    const errCode = String(e?.serverResponseCode ?? '')
+    const isAuthError = errCode === 'AUTHENTICATIONFAILED' || String(errMsg).toLowerCase().includes('authentication failed')
+    log.error({ accountId, err: String(errMsg), code: errCode, disabledSync: isAuthError }, 'sync failed')
     await prisma.mailAccount.update({
       where: { id: accountId },
-      data: { syncState: 'ERROR', lastError: String(errMsg) }
+      data: {
+        syncState: 'ERROR',
+        lastError: String(errMsg),
+        ...(isAuthError ? { syncEnabled: false } : {}),
+      }
     })
     await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'ERROR', error: String(errMsg) }))
   }
@@ -281,8 +287,9 @@ async function upsertBatch(
 function hasAttach(struct: unknown): boolean {
   if (!struct || typeof struct !== 'object') return false
   const s = struct as Record<string, unknown>
-  if (typeof s.disposition === 'string' && s.disposition.toLowerCase() === 'attachment') return true
-  if (Array.isArray(s.childNodes)) return s.childNodes.some(hasAttach)
+  const disp = s.disposition as { type?: string } | undefined
+  if (disp?.type?.toLowerCase() === 'attachment') return true
+  if (Array.isArray(s.childNodes)) return (s.childNodes as unknown[]).some(hasAttach)
   return false
 }
 

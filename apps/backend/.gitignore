@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+.env.*
+*.log
+seed_users_prod.sql

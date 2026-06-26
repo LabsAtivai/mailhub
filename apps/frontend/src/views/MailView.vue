@@ -23,9 +23,12 @@
       <div v-for="acc in mail.accounts" :key="acc.id" class="account-section">
         <div class="account-header" @click="toggleAccount(acc.id)">
           <i class="pi pi-chevron-right expand-icon" :class="{ expanded: expandedAccounts.has(acc.id) }"></i>
-          <span class="account-email" :title="acc.emailAddress">{{ acc.emailAddress }}</span>
+          <span class="account-email" :title="acc.displayName || acc.emailAddress">{{ acc.displayName || acc.emailAddress }}</span>
           <span v-if="acc.syncState === 'SYNCING'" class="sync-badge">↻</span>
           <span v-else-if="acc.syncState === 'ERROR'" class="err-badge" :title="acc.lastError ?? ''">!</span>
+          <button class="icon-btn" v-tooltip="'Editar conta'" @click.stop="openEditAccount(acc)">
+            <i class="pi pi-cog" style="font-size:.65rem"></i>
+          </button>
         </div>
 
         <div v-if="acc.syncState === 'SYNCING' && mail.syncProgress[acc.id]" class="sync-progress">
@@ -227,6 +230,7 @@
 
     <!-- dialogs -->
     <AddAccountDialog v-model:visible="showAddAccount" @added="mail.fetchAccounts()" />
+    <EditAccountDialog v-model:visible="showEditAccount" :account="editingAccount" @saved="mail.fetchAccounts()" />
     <ComposeDialog v-model:visible="showCompose" :reply-to="replyTo" :forward-msg="forwardMsg" @sent="showCompose = false" />
     <LabelManagerDialog v-model:visible="showLabelManager" @update:visible="onLabelManagerClose" />
   </div>
@@ -242,6 +246,7 @@ import { useAuthStore } from '../stores/auth'
 import { useMailStore, type MessageDetail, type Attachment } from '../stores/mail'
 import { useLabelStore, type Label } from '../stores/labels'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
+import EditAccountDialog from '../components/EditAccountDialog.vue'
 import ComposeDialog from '../components/ComposeDialog.vue'
 import LabelManagerDialog from '../components/LabelManagerDialog.vue'
 import LabelPicker from '../components/LabelPicker.vue'
@@ -256,6 +261,8 @@ const router = useRouter()
 const toast = useToast()
 
 const showAddAccount = ref(false)
+const showEditAccount = ref(false)
+const editingAccount = ref<import('../stores/mail').MailAccount | null>(null)
 const showCompose = ref(false)
 const showLabelManager = ref(false)
 const replyTo = ref<MessageDetail | null>(null)
@@ -377,6 +384,11 @@ const senderInitial = computed(() => {
   const name = mail.selectedMessage?.fromName || mail.selectedMessage?.fromEmail || '?'
   return name.charAt(0).toUpperCase()
 })
+
+function openEditAccount(acc: import('../stores/mail').MailAccount) {
+  editingAccount.value = acc
+  showEditAccount.value = true
+}
 
 function toggleAccount(id: string) {
   if (expandedAccounts.value.has(id)) expandedAccounts.value.delete(id)

@@ -1,10 +1,11 @@
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: mailhub-postgres
     environment:
       POSTGRES_DB: mailhub
       POSTGRES_USER: mailhub
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mailhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -17,24 +18,30 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: mailhub-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     ports:
       - "6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
+      timeout: 3s
+      retries: 5
 
   backend:
     build:
       context: ./apps/backend
+    container_name: mailhub-backend
     ports:
       - "3001:3001"
     environment:
-      DATABASE_URL: postgresql://mailhub:${POSTGRES_PASSWORD:-mailhub}@postgres:5432/mailhub
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      CORS_ORIGIN: http://localhost:5173
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN must be set}
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3001
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
     depends_on:
@@ -47,12 +54,16 @@ services:
   worker:
     build:
       context: ./apps/worker
+    container_name: mailhub-worker
     environment:
-      DATABASE_URL: postgresql://mailhub:${POSTGRES_PASSWORD:-mailhub}@postgres:5432/mailhub
-      REDIS_URL: redis://redis:6379
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+      NODE_ENV: ${NODE_ENV:-production}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     profiles: ["full"]
 
@@ -60,7 +71,8 @@ services:
     build:
       context: ./apps/frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        VITE_API_URL: ${VITE_API_URL:-/}
+    container_name: mailhub-frontend
     ports:
       - "8080:80"
     depends_on:
@@ -72,4 +84,4 @@ volumes:
 
 networks:
   default:
-    name: mailhub-dev
+    name: ativaai

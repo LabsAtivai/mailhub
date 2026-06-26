@@ -5,6 +5,9 @@ import { getSocket, isSocketInitialized, setSocketInitialized } from '../service
 
 export interface MailAccount {
   id: string; displayName: string; emailAddress: string
+  incomingHost: string; incomingPort: number
+  outgoingHost: string; outgoingPort: number
+  username: string; tlsMode: string
   syncState: string; lastSyncAt: string | null; lastError: string | null; createdAt: string
 }
 export interface Folder {
