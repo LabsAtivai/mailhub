@@ -54,6 +54,20 @@
           option-label="label" option-value="value" fluid />
       </div>
 
+      <Divider style="margin:.4rem 0" />
+
+      <div class="forward-section">
+        <div class="forward-header">
+          <div>
+            <span class="forward-label">Encaminhamento automático</span>
+            <span class="forward-desc">Encaminha todos os emails recebidos para outro endereço</span>
+          </div>
+          <ToggleSwitch v-model="form.forwardEnabled" />
+        </div>
+        <InputText v-if="form.forwardEnabled" v-model="form.forwardTo"
+          type="email" fluid placeholder="destino@email.com" />
+      </div>
+
       <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     </div>
 
@@ -75,11 +89,13 @@
 <script setup lang="ts">
 import { ref, reactive, watch } from 'vue'
 import Dialog from 'primevue/dialog'
+import Divider from 'primevue/divider'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
+import ToggleSwitch from 'primevue/toggleswitch'
 import { api } from '../services/api'
 import { extractError } from '../services/errorMessage'
 import type { MailAccount } from '../stores/mail'
@@ -97,6 +113,8 @@ const form = reactive({
   incomingHost: '', incomingPort: 993,
   outgoingHost: '', outgoingPort: 465,
   tlsMode: 'TLS',
+  forwardEnabled: false,
+  forwardTo: '',
 })
 
 const saving = ref(false)
@@ -118,6 +136,8 @@ watch(() => props.account, (acc) => {
     outgoingHost: acc.outgoingHost,
     outgoingPort: acc.outgoingPort,
     tlsMode: acc.tlsMode,
+    forwardEnabled: acc.forwardEnabled ?? false,
+    forwardTo: acc.forwardTo ?? '',
   })
   error.value = ''
 }, { immediate: true })
@@ -151,6 +171,8 @@ async function save() {
       outgoingHost: form.outgoingHost,
       outgoingPort: form.outgoingPort,
       tlsMode: form.tlsMode,
+      forwardEnabled: form.forwardEnabled,
+      forwardTo: form.forwardEnabled && form.forwardTo ? form.forwardTo : null,
     }
     if (form.password) payload.password = form.password
     await api.patch(`/accounts/${props.account.id}`, payload)
@@ -173,4 +195,8 @@ async function save() {
 .w80 { width: 80px; }
 .footer-left { flex: 1; display: flex; align-items: center; gap: .4rem; }
 .confirm-text { font-size: .82rem; color: var(--p-red-600); font-weight: 500; }
+.forward-section { display: flex; flex-direction: column; gap: .5rem; }
+.forward-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.forward-label { display: block; font-size: .85rem; font-weight: 600; }
+.forward-desc { display: block; font-size: .75rem; color: var(--p-text-muted-color); margin-top: 1px; }
 </style>
