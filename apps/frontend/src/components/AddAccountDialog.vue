@@ -11,7 +11,7 @@
       <div class="field">
         <label>E-mail da conta *</label>
         <InputText v-model="form.emailAddress" type="email" fluid placeholder="roberto@dominio.com"
-          @blur="autoFillUsername" />
+          @blur="autoFillFromEmail" />
       </div>
 
       <div class="field">
@@ -38,7 +38,7 @@
       <div class="row">
         <div class="field flex-1">
           <label>Servidor SMTP *</label>
-          <InputText v-model="form.outgoingHost" fluid placeholder="Igual ao IMAP" />
+          <InputText v-model="form.outgoingHost" fluid />
         </div>
         <div class="field w80">
           <label>Porta</label>
@@ -98,8 +98,7 @@ const saving = ref(false)
 const testResult = ref<'ok' | 'error' | null>(null)
 const testError = ref('')
 
-// auto-fill helpers
-function autoFillUsername() {
+function autoFillFromEmail() {
   if (!form.username && form.emailAddress) form.username = form.emailAddress
   if (!form.incomingHost && form.emailAddress) {
     const domain = form.emailAddress.split('@')[1]
@@ -125,7 +124,6 @@ async function save() {
     await api.post('/accounts', { ...form })
     emit('update:visible', false)
     emit('added')
-    // reset
     Object.assign(form, {
       displayName: '', emailAddress: '', username: '', password: '',
       incomingHost: '', incomingPort: 993,
