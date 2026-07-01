@@ -58,6 +58,14 @@
     </div>
 
     <template #footer>
+      <div class="footer-left">
+        <Button v-if="!confirmDelete" label="Remover conta" text severity="danger" @click="confirmDelete = true" />
+        <template v-else>
+          <span class="confirm-text">Tem certeza?</span>
+          <Button label="Sim, remover" severity="danger" size="small" :loading="deleting" @click="remove" />
+          <Button label="Cancelar" text size="small" @click="confirmDelete = false" />
+        </template>
+      </div>
       <Button label="Cancelar" text @click="$emit('update:visible', false)" />
       <Button label="Salvar" :loading="saving" @click="save" />
     </template>
@@ -92,7 +100,11 @@ const form = reactive({
 })
 
 const saving = ref(false)
+const deleting = ref(false)
+const confirmDelete = ref(false)
 const error = ref('')
+
+watch(() => props.visible, () => { confirmDelete.value = false; error.value = '' })
 
 watch(() => props.account, (acc) => {
   if (!acc) return
@@ -109,6 +121,21 @@ watch(() => props.account, (acc) => {
   })
   error.value = ''
 }, { immediate: true })
+
+async function remove() {
+  if (!props.account) return
+  deleting.value = true
+  try {
+    await api.delete(`/accounts/${props.account.id}`)
+    emit('update:visible', false)
+    emit('saved')
+  } catch (e: unknown) {
+    error.value = extractError(e, 'Erro ao remover conta')
+    confirmDelete.value = false
+  } finally {
+    deleting.value = false
+  }
+}
 
 async function save() {
   if (!props.account) return
@@ -144,4 +171,6 @@ async function save() {
 .row { display: flex; gap: .75rem; align-items: flex-end; }
 .flex-1 { flex: 1; }
 .w80 { width: 80px; }
+.footer-left { flex: 1; display: flex; align-items: center; gap: .4rem; }
+.confirm-text { font-size: .82rem; color: var(--p-red-600); font-weight: 500; }
 </style>
