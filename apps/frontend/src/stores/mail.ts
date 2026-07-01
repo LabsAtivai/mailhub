@@ -18,6 +18,7 @@ export interface MessageSummary {
   id: string; uid: string; subject: string | null; preview: string | null
   fromName: string | null; fromEmail: string | null; toJson: string
   date: string; isRead: boolean; isFlagged: boolean; hasAttachments: boolean; size: number | null
+  inReplyTo: string | null
   labels: { id: string; name: string; color: string }[]
 }
 export interface MessageDetail extends MessageSummary {
@@ -212,6 +213,10 @@ export const useMailStore = defineStore('mail', () => {
     }
     setSocketInitialized(true)
 
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+
     const socket = getSocket()
     connected.value = socket.connected
 
@@ -226,7 +231,7 @@ export const useMailStore = defineStore('mail', () => {
     for (const id of accountIds) socket.emit('join:account', id)
 
     // ── mail events ──────────────────────────────────────────────────────────
-    socket.on('mail:new', (payload: { messageId: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string }) => {
+    socket.on('mail:new', (payload: { messageId: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string; inReplyTo?: string | null }) => {
       if (payload.folderId === selectedFolderId.value) {
         const exists = messages.value.some(x => x.id === payload.messageId)
         if (!exists) {
@@ -234,11 +239,21 @@ export const useMailStore = defineStore('mail', () => {
             id: payload.messageId, uid: '', subject: payload.subject ?? null,
             preview: null, fromName: payload.fromName ?? null, fromEmail: payload.fromEmail ?? null,
             toJson: '[]', date: new Date().toISOString(),
-            isRead: false, isFlagged: false, hasAttachments: false, size: null, labels: [],
+            isRead: false, isFlagged: false, hasAttachments: false, size: null,
+            inReplyTo: payload.inReplyTo ?? null, labels: [],
           }, ...messages.value]
         }
       }
       updateFolderUnread(payload.folderId, 1)
+
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+        const n = new Notification(payload.fromName || payload.fromEmail || 'Novo email', {
+          body: payload.subject || '(sem assunto)',
+          icon: '/favicon.ico',
+          tag: payload.messageId,
+        })
+        n.onclick = () => { window.focus(); n.close() }
+      }
     })
 
     socket.on('mail:bodyReady', (payload: { messageId: string }) => {

@@ -273,12 +273,13 @@ async function upsertBatch(
   if (notify && toCreate.length > 0) {
     const created = await prisma.message.findMany({
       where: { accountId, folderId, uid: { in: toCreate.map(m => m.uid as bigint) } },
-      select: { id: true, uid: true, subject: true, fromName: true, fromEmail: true }
+      select: { id: true, uid: true, subject: true, fromName: true, fromEmail: true, inReplyTo: true }
     })
     for (const msg of created) {
       await redis.publish('mail:new', JSON.stringify({
         accountId, folderId, messageId: msg.id,
         subject: msg.subject, fromEmail: msg.fromEmail, fromName: msg.fromName,
+        inReplyTo: msg.inReplyTo,
       }))
     }
   }

@@ -120,7 +120,10 @@
             <span class="msg-date">{{ formatDate(msg.date) }}</span>
           </div>
           <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
-          <div v-if="msg.labels?.length" class="msg-labels">
+          <div v-if="msg.inReplyTo || msg.labels?.length" class="msg-badges">
+            <span v-if="msg.inReplyTo" class="reply-chip">
+              <i class="pi pi-reply"></i> Resposta
+            </span>
             <span v-for="l in msg.labels" :key="l.id" class="msg-label-chip"
               :style="{ background: l.color + '22', borderColor: l.color, color: l.color }">
               {{ l.name }}
@@ -180,7 +183,12 @@
         </div>
       </div>
 
-      <div class="viewer-subject">{{ mail.selectedMessage.subject || '(sem assunto)' }}</div>
+      <div class="viewer-subject">
+        <span v-if="mail.selectedMessage.inReplyTo" class="reply-chip reply-chip-viewer">
+          <i class="pi pi-reply"></i> Resposta
+        </span>
+        {{ mail.selectedMessage.subject || '(sem assunto)' }}
+      </div>
 
       <div class="viewer-meta">
         <div class="sender-avatar">{{ senderInitial }}</div>
@@ -718,10 +726,20 @@ async function downloadAttachment(att: Attachment) {
 .msg-row3 { display: flex; align-items: center; gap: .4rem; }
 .msg-preview { font-size: .74rem; color: var(--p-text-muted-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .att-icon { font-size: .72rem; color: var(--p-text-muted-color); }
-.msg-labels { display: flex; flex-wrap: wrap; gap: .2rem; margin: 2px 0 1px; }
+.msg-badges { display: flex; flex-wrap: wrap; gap: .2rem; margin: 2px 0 1px; }
 .msg-label-chip {
   font-size: .62rem; padding: .05rem .38rem; border-radius: 10px; border: 1px solid;
   white-space: nowrap; font-weight: 500; line-height: 1.5;
+}
+.reply-chip {
+  display: inline-flex; align-items: center; gap: .2rem;
+  font-size: .62rem; padding: .05rem .38rem; border-radius: 10px;
+  border: 1px solid #16a34a; background: #f0fdf4; color: #16a34a;
+  white-space: nowrap; font-weight: 600; line-height: 1.5;
+}
+.reply-chip i { font-size: .58rem; }
+.reply-chip-viewer {
+  font-size: .72rem; padding: .08rem .5rem; vertical-align: middle; margin-right: .4rem;
 }
 .read-btn { font-size: .78rem; color: var(--p-text-muted-color); cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .1s; }
 .msg-item:hover .read-btn { opacity: 1; }
