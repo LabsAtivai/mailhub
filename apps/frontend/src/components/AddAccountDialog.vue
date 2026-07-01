@@ -1,6 +1,6 @@
 <template>
   <Dialog :visible="visible" @update:visible="$emit('update:visible', $event)"
-    header="Adicionar conta de e-mail" modal style="width:500px" :closable="true">
+    header="Adicionar conta de e-mail" modal style="width:440px" :closable="true">
 
     <div class="form">
       <div class="field">
@@ -24,34 +24,6 @@
         <Password v-model="form.password" :feedback="false" toggleMask fluid />
       </div>
 
-      <div class="row">
-        <div class="field flex-1">
-          <label>Servidor IMAP *</label>
-          <InputText v-model="form.incomingHost" fluid placeholder="mail.dominio.com" />
-        </div>
-        <div class="field w80">
-          <label>Porta</label>
-          <InputText :model-value="String(form.incomingPort)" @update:model-value="form.incomingPort = Number($event) || 993" fluid />
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="field flex-1">
-          <label>Servidor SMTP *</label>
-          <InputText v-model="form.outgoingHost" fluid />
-        </div>
-        <div class="field w80">
-          <label>Porta</label>
-          <InputText :model-value="String(form.outgoingPort)" @update:model-value="form.outgoingPort = Number($event) || 465" fluid />
-        </div>
-      </div>
-
-      <div class="field">
-        <label>Segurança</label>
-        <Select v-model="form.tlsMode" :options="tlsOptions"
-          option-label="label" option-value="value" fluid />
-      </div>
-
       <div v-if="testResult === 'ok'" class="status-ok">
         <i class="pi pi-check-circle"></i> Conexão bem-sucedida — pode salvar
       </div>
@@ -72,26 +44,18 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import Select from 'primevue/select'
 import { api } from '../services/api'
 import { extractError } from '../services/errorMessage'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits(['update:visible', 'added'])
 
-const SMTP_DEFAULT = { host: 'smtp.sendgrid.net', port: 465 }
-
 const form = reactive({
   displayName: '', emailAddress: '', username: '', password: '',
   incomingHost: '', incomingPort: 993,
-  outgoingHost: SMTP_DEFAULT.host, outgoingPort: SMTP_DEFAULT.port,
+  outgoingHost: 'smtp.sendgrid.net', outgoingPort: 465,
   tlsMode: 'TLS',
 })
-
-const tlsOptions = [
-  { label: 'TLS (porta 993 IMAP / 465 SMTP)', value: 'TLS' },
-  { label: 'STARTTLS (porta 143 IMAP / 587 SMTP)', value: 'STARTTLS' },
-]
 
 const testing = ref(false)
 const saving = ref(false)
@@ -100,7 +64,7 @@ const testError = ref('')
 
 function autoFillFromEmail() {
   if (!form.username && form.emailAddress) form.username = form.emailAddress
-  if (!form.incomingHost && form.emailAddress) {
+  if (form.emailAddress) {
     const domain = form.emailAddress.split('@')[1]
     if (domain) form.incomingHost = `mail.${domain}`
   }
@@ -127,7 +91,7 @@ async function save() {
     Object.assign(form, {
       displayName: '', emailAddress: '', username: '', password: '',
       incomingHost: '', incomingPort: 993,
-      outgoingHost: SMTP_DEFAULT.host, outgoingPort: SMTP_DEFAULT.port, tlsMode: 'TLS'
+      outgoingHost: 'smtp.sendgrid.net', outgoingPort: 465, tlsMode: 'TLS'
     })
     testResult.value = null
   } catch (e: unknown) {
@@ -141,8 +105,5 @@ async function save() {
 .form { display: flex; flex-direction: column; gap: .75rem; }
 .field { display: flex; flex-direction: column; gap: .35rem; }
 .field label { font-size: .8rem; font-weight: 500; }
-.row { display: flex; gap: .75rem; align-items: flex-end; }
-.flex-1 { flex: 1; }
-.w80 { width: 80px; }
 .status-ok { display: flex; align-items: center; gap: .5rem; color: #25D366; font-size: .875rem; padding: .5rem; background: #f0fdf4; border-radius: 6px; }
 </style>
