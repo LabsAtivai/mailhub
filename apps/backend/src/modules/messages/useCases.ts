@@ -126,12 +126,15 @@ export const messageUseCases = {
     const account = await repo.findAccountForUser(dto.accountId, userId)
     if (!account) throw new NotFoundError('Conta não encontrada')
 
-    const password = decrypt(account.encryptedPassword)
+    const isSendGrid = account.outgoingHost === 'smtp.sendgrid.net'
+    const smtpAuth = isSendGrid
+      ? { user: 'apikey', pass: process.env.SENDGRID_API_KEY ?? '' }
+      : { user: account.username, pass: decrypt(account.encryptedPassword) }
     const transporter = nodemailer.createTransport({
       host: account.outgoingHost,
       port: account.outgoingPort,
       secure: account.tlsMode === 'TLS',
-      auth: { user: account.username, pass: password },
+      auth: smtpAuth,
     })
 
     let info
