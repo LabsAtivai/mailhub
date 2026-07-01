@@ -4,10 +4,12 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import http from 'http'
+import nodemailer from 'nodemailer'
 import { Server as SocketServer } from 'socket.io'
 import { redis } from './lib/redis'
 import { prisma } from './lib/prisma'
 import { verifyAccess } from './lib/jwt'
+import { decrypt } from './lib/crypto'
 import { logger } from './lib/logger'
 
 import authRoutes from './modules/auth/routes'
@@ -116,10 +118,61 @@ redisSub.on('message', (channel: string, message: string) => {
       return
     }
     io.to(`account:${payload.accountId}`).emit(channel, payload)
+
+    if (channel === 'mail:bodyReady' && payload.messageId) {
+      forwardIfEnabled(payload.accountId, payload.messageId).catch(err =>
+        logger.error({ err, accountId: payload.accountId, messageId: payload.messageId }, 'auto-forward error')
+      )
+    }
   } catch (err) {
     logger.error({ channel, err }, 'redis message parse error')
   }
 })
+
+async function forwardIfEnabled(accountId: string, messageId: string) {
+  const account = await prisma.mailAccount.findFirst({
+    where: { id: accountId, forwardEnabled: true },
+    select: {
+      forwardTo: true, displayName: true, emailAddress: true,
+      outgoingHost: true, outgoingPort: true, tlsMode: true,
+      username: true, encryptedPassword: true,
+    },
+  })
+  if (!account?.forwardTo) return
+
+  const msg = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { subject: true, fromName: true, fromEmail: true, htmlBody: true, textBody: true, messageId: true },
+  })
+  if (!msg) return
+
+  const isSendGrid = account.outgoingHost === 'smtp.sendgrid.net'
+  const smtpAuth = isSendGrid
+    ? { user: 'apikey', pass: process.env.SENDGRID_API_KEY ?? '' }
+    : { user: account.username, pass: decrypt(account.encryptedPassword) }
+
+  const transporter = nodemailer.createTransport({
+    host: account.outgoingHost,
+    port: account.outgoingPort,
+    secure: account.tlsMode === 'TLS',
+    auth: smtpAuth,
+  })
+
+  const from = msg.fromName ? `${msg.fromName} <${msg.fromEmail}>` : msg.fromEmail
+  try {
+    await transporter.sendMail({
+      from: `${account.displayName} <${account.emailAddress}>`,
+      to: account.forwardTo,
+      subject: `Fwd: ${msg.subject ?? '(sem assunto)'}`,
+      html: msg.htmlBody ?? msg.textBody ?? '',
+      text: msg.textBody ?? '',
+      replyTo: from ?? undefined,
+    })
+    logger.info({ accountId, messageId, forwardTo: account.forwardTo }, 'email auto-forwarded')
+  } finally {
+    transporter.close()
+  }
+}
 
 // ── global error handler ────────────────────────────────────────────────────
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

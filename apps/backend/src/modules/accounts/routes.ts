@@ -70,7 +70,8 @@ router.get('/', wrap(async (req: AuthRequest, res: Response) => {
       incomingHost: true, incomingPort: true,
       outgoingHost: true, outgoingPort: true,
       username: true, tlsMode: true,
-      syncState: true, lastSyncAt: true, lastError: true, createdAt: true
+      syncState: true, lastSyncAt: true, lastError: true, createdAt: true,
+      forwardEnabled: true, forwardTo: true
     }
   })
   res.json(accounts)
@@ -158,6 +159,8 @@ router.patch('/:id', wrap(async (req: AuthRequest, res: Response) => {
     password: z.string().optional(),
     tlsMode: z.enum(['TLS', 'STARTTLS']).optional(),
     syncEnabled: z.boolean().optional(),
+    forwardEnabled: z.boolean().optional(),
+    forwardTo: z.string().email().nullable().optional(),
   })
   const parsed = Schema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
@@ -169,9 +172,11 @@ router.patch('/:id', wrap(async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Host inválido' }); return
   }
 
-  const { password, syncEnabled, ...rest } = parsed.data
+  const { password, syncEnabled, forwardEnabled, forwardTo, ...rest } = parsed.data
   const data: Record<string, unknown> = { ...rest }
   if (typeof syncEnabled === 'boolean') data.syncEnabled = syncEnabled
+  if (typeof forwardEnabled === 'boolean') data.forwardEnabled = forwardEnabled
+  if (forwardTo !== undefined) data.forwardTo = forwardTo
   if (password) data.encryptedPassword = encrypt(password)
 
   const updated = await prisma.mailAccount.update({

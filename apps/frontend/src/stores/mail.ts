@@ -9,6 +9,7 @@ export interface MailAccount {
   outgoingHost: string; outgoingPort: number
   username: string; tlsMode: string
   syncState: string; lastSyncAt: string | null; lastError: string | null; createdAt: string
+  forwardEnabled: boolean; forwardTo: string | null
 }
 export interface Folder {
   id: string; path: string; name: string; specialUse: string | null
