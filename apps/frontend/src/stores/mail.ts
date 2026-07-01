@@ -18,6 +18,7 @@ export interface MessageSummary {
   id: string; uid: string; subject: string | null; preview: string | null
   fromName: string | null; fromEmail: string | null; toJson: string
   date: string; isRead: boolean; isFlagged: boolean; hasAttachments: boolean; size: number | null
+  labels: { id: string; name: string; color: string }[]
 }
 export interface MessageDetail extends MessageSummary {
   htmlBody: string | null; textBody: string | null; ccJson: string | null
@@ -152,6 +153,24 @@ export const useMailStore = defineStore('mail', () => {
     }
   }
 
+  async function toggleRead(id: string, isRead: boolean) {
+    const prevMessages = messages.value
+    const prevSearch = searchResults.value
+    const prevSelected = selectedMessage.value
+    messages.value = messages.value.map(m => m.id === id ? { ...m, isRead } : m)
+    searchResults.value = searchResults.value.map(m => m.id === id ? { ...m, isRead } : m)
+    if (selectedMessage.value?.id === id) selectedMessage.value = { ...selectedMessage.value, isRead }
+    if (selectedFolderId.value) updateFolderUnread(selectedFolderId.value, isRead ? -1 : 1)
+    try {
+      await api.patch(`/messages/${id}`, { isRead })
+    } catch {
+      messages.value = prevMessages
+      searchResults.value = prevSearch
+      selectedMessage.value = prevSelected
+      if (selectedFolderId.value) updateFolderUnread(selectedFolderId.value, isRead ? 1 : -1)
+    }
+  }
+
   async function deleteMessage(id: string) {
     await api.delete(`/messages/${id}`)
     messages.value = messages.value.filter(x => x.id !== id)
@@ -215,7 +234,7 @@ export const useMailStore = defineStore('mail', () => {
             id: payload.messageId, uid: '', subject: payload.subject ?? null,
             preview: null, fromName: payload.fromName ?? null, fromEmail: payload.fromEmail ?? null,
             toJson: '[]', date: new Date().toISOString(),
-            isRead: false, isFlagged: false, hasAttachments: false, size: null,
+            isRead: false, isFlagged: false, hasAttachments: false, size: null, labels: [],
           }, ...messages.value]
         }
       }
@@ -290,7 +309,7 @@ export const useMailStore = defineStore('mail', () => {
     messages, nextCursor, selectedMessage, searchResults, searchQuery,
     loadingMessages, loadingMessage, connected, syncProgress,
     fetchAccounts, fetchFolders, selectFolder, loadMessages,
-    selectMessage, refreshMessage, toggleFlag, deleteMessage,
+    selectMessage, refreshMessage, toggleFlag, toggleRead, deleteMessage,
     search, loadLabelMessages,
   }
 })

@@ -13,12 +13,14 @@ export interface MessageListItem {
   isFlagged: boolean
   hasAttachments: boolean
   size: number | null
+  labels: { label: { id: string; name: string; color: string } }[]
 }
 
 const LIST_SELECT = {
   id: true, uid: true, subject: true, preview: true,
   fromName: true, fromEmail: true, toJson: true,
   date: true, isRead: true, isFlagged: true, hasAttachments: true, size: true,
+  labels: { select: { label: { select: { id: true, name: true, color: true } } } },
 } as const
 
 function parseCursor(cursor: string): { date: Date; id: string } {

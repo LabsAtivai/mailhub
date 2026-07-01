@@ -120,9 +120,19 @@
             <span class="msg-date">{{ formatDate(msg.date) }}</span>
           </div>
           <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
+          <div v-if="msg.labels?.length" class="msg-labels">
+            <span v-for="l in msg.labels" :key="l.id" class="msg-label-chip"
+              :style="{ background: l.color + '22', borderColor: l.color, color: l.color }">
+              {{ l.name }}
+            </span>
+          </div>
           <div class="msg-row3">
             <span class="msg-preview">{{ msg.preview || '' }}</span>
             <i v-if="msg.hasAttachments" class="pi pi-paperclip att-icon"></i>
+            <i class="pi read-btn"
+              :class="msg.isRead ? 'pi-envelope' : 'pi-envelope-open read-unread'"
+              :title="msg.isRead ? 'Marcar como não lido' : 'Marcar como lido'"
+              @click.stop="mail.toggleRead(msg.id, !msg.isRead)"></i>
             <i class="pi flag-btn"
               :class="msg.isFlagged ? 'pi-star-fill flagged' : 'pi-star'"
               @click.stop="mail.toggleFlag(msg.id, !msg.isFlagged)"></i>
@@ -159,6 +169,11 @@
             @click="mail.toggleFlag(mail.selectedMessage!.id, !mail.selectedMessage!.isFlagged)"
             v-tooltip="mail.selectedMessage.isFlagged ? 'Remover favorito' : 'Favoritar'">
             <i :class="['pi', mail.selectedMessage.isFlagged ? 'pi-star-fill' : 'pi-star']"></i>
+          </Button>
+          <Button text rounded size="small"
+            @click="mail.toggleRead(mail.selectedMessage!.id, !mail.selectedMessage!.isRead)"
+            v-tooltip="mail.selectedMessage.isRead ? 'Marcar como não lido' : 'Marcar como lido'">
+            <i :class="['pi', mail.selectedMessage.isRead ? 'pi-envelope' : 'pi-envelope-open']"></i>
           </Button>
           <Button icon="pi pi-trash" text rounded size="small" severity="danger"
             @click="mail.deleteMessage(mail.selectedMessage!.id)" v-tooltip="'Lixeira'" />
@@ -504,9 +519,11 @@ async function loadMoreLabelMessages() {
 }
 
 function onLabelPickerChange(updatedLabels: Array<{ id: string; name: string; color: string }>) {
-  if (mail.selectedMessage) {
-    mail.selectedMessage = { ...mail.selectedMessage, labels: updatedLabels }
-  }
+  if (!mail.selectedMessage) return
+  const id = mail.selectedMessage.id
+  mail.selectedMessage = { ...mail.selectedMessage, labels: updatedLabels }
+  mail.messages = mail.messages.map(m => m.id === id ? { ...m, labels: updatedLabels } : m)
+  mail.searchResults = mail.searchResults.map(m => m.id === id ? { ...m, labels: updatedLabels } : m)
 }
 
 function onLabelManagerClose(visible: boolean) {
@@ -701,6 +718,14 @@ async function downloadAttachment(att: Attachment) {
 .msg-row3 { display: flex; align-items: center; gap: .4rem; }
 .msg-preview { font-size: .74rem; color: var(--p-text-muted-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .att-icon { font-size: .72rem; color: var(--p-text-muted-color); }
+.msg-labels { display: flex; flex-wrap: wrap; gap: .2rem; margin: 2px 0 1px; }
+.msg-label-chip {
+  font-size: .62rem; padding: .05rem .38rem; border-radius: 10px; border: 1px solid;
+  white-space: nowrap; font-weight: 500; line-height: 1.5;
+}
+.read-btn { font-size: .78rem; color: var(--p-text-muted-color); cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .1s; }
+.msg-item:hover .read-btn { opacity: 1; }
+.read-btn.read-unread { color: #F47A20; opacity: 1; }
 .flag-btn { font-size: .78rem; color: var(--p-text-muted-color); cursor: pointer; flex-shrink: 0; }
 .flag-btn.flagged { color: #F59E0B; }
 .load-more { padding: .6rem; text-align: center; }

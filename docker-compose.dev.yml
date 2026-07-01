@@ -1,0 +1,99 @@
+services:
+
+  mailhub-dev-postgres:
+    image: postgres:16-alpine
+    container_name: mailhub-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mailhub
+      POSTGRES_USER: mailhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - mailhub_dev_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailhub -d mailhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - mailhub-dev-net
+
+  mailhub-dev-redis:
+    image: redis:7-alpine
+    container_name: mailhub-dev-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - mailhub_dev_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - mailhub-dev-net
+
+  mailhub-dev-backend:
+    image: ghcr.io/labsativai/mailhub-backend:${TAG:-dev}
+    container_name: mailhub-dev-backend
+    restart: unless-stopped
+    depends_on:
+      mailhub-dev-postgres:
+        condition: service_healthy
+      mailhub-dev-redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      PORT: 3001
+      NODE_ENV: development
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+    networks:
+      mailhub-dev-net:
+        aliases:
+          - mailhub-backend
+      ativaai: {}
+
+  mailhub-dev-worker:
+    image: ghcr.io/labsativai/mailhub-worker:${TAG:-dev}
+    container_name: mailhub-dev-worker
+    restart: unless-stopped
+    depends_on:
+      mailhub-dev-postgres:
+        condition: service_healthy
+      mailhub-dev-redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      NODE_ENV: development
+      IMAP_PROXY_URL: ${IMAP_PROXY_URL:-}
+    networks:
+      - mailhub-dev-net
+
+  mailhub-dev-frontend:
+    image: ghcr.io/labsativai/mailhub-frontend:${TAG:-dev}
+    container_name: mailhub-dev-frontend
+    restart: unless-stopped
+    depends_on:
+      - mailhub-dev-backend
+    networks:
+      - mailhub-dev-net
+      - ativaai
+
+volumes:
+  mailhub_dev_postgres:
+  mailhub_dev_redis:
+
+networks:
+  mailhub-dev-net:
+    driver: bridge
+  ativaai:
+    external: true

@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer'
 import { messageRepository as repo } from './repository'
 import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
+import { decrypt } from '../../lib/crypto'
 
 const log = scope('messages')
 
@@ -42,7 +43,7 @@ export const messageUseCases = {
     const nextCursor = hasMore
       ? `${items[items.length - 1].date.toISOString()}_${items[items.length - 1].id}`
       : null
-    return { items, nextCursor }
+    return { items: items.map(m => ({ ...m, labels: m.labels.map(ml => ml.label) })), nextCursor }
   },
 
   async getDetail(messageId: string, userId: string) {
@@ -114,7 +115,8 @@ export const messageUseCases = {
     }
 
     const accountIds = await repo.accountIdsForUser(userId)
-    return repo.search(accountIds, where)
+    const rows = await repo.search(accountIds, where)
+    return rows.map(m => ({ ...m, labels: m.labels.map(ml => ml.label) }))
   },
 
   async send(userId: string, dto: {
@@ -124,14 +126,12 @@ export const messageUseCases = {
     const account = await repo.findAccountForUser(dto.accountId, userId)
     if (!account) throw new NotFoundError('Conta não encontrada')
 
-    const sgKey = process.env.SENDGRID_API_KEY
-    if (!sgKey) throw new SmtpError('SENDGRID_API_KEY não configurada no servidor')
-
+    const password = decrypt(account.encryptedPassword)
     const transporter = nodemailer.createTransport({
-      host: 'smtp.sendgrid.net',
-      port: 587,
-      secure: false,
-      auth: { user: 'apikey', pass: sgKey },
+      host: account.outgoingHost,
+      port: account.outgoingPort,
+      secure: account.tlsMode === 'TLS',
+      auth: { user: account.username, pass: password },
     })
 
     let info
@@ -150,7 +150,7 @@ export const messageUseCases = {
       const e = err as Record<string, unknown>
       const code = e?.responseCode ?? e?.code ?? ''
       const msg = e?.response ?? e?.message ?? 'Falha no envio'
-      log.error({ accountId: account.id, from: account.emailAddress, code, msg: String(msg) }, 'sendgrid send failed')
+      log.error({ accountId: account.id, from: account.emailAddress, code, msg: String(msg) }, 'smtp send failed')
       throw new SmtpError(String(msg))
     } finally {
       transporter.close()
@@ -159,7 +159,7 @@ export const messageUseCases = {
     await redis.publish('mailhub:sent:append', JSON.stringify({
       accountId: account.id, messageId: info.messageId,
     }))
-    log.info({ accountId: account.id, to: dto.to.length }, 'message sent via sendgrid')
+    log.info({ accountId: account.id, to: dto.to.length }, 'message sent via smtp')
     return { messageId: info.messageId }
   },
 
