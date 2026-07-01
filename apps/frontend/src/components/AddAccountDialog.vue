@@ -27,8 +27,7 @@
       <div class="row">
         <div class="field flex-1">
           <label>Servidor IMAP *</label>
-          <InputText v-model="form.incomingHost" fluid placeholder="mail.dominio.com"
-            @blur="autoFillOutgoing" />
+          <InputText v-model="form.incomingHost" fluid placeholder="mail.dominio.com" />
         </div>
         <div class="field w80">
           <label>Porta</label>
@@ -80,10 +79,12 @@ import { extractError } from '../services/errorMessage'
 defineProps<{ visible: boolean }>()
 const emit = defineEmits(['update:visible', 'added'])
 
+const SMTP_DEFAULT = { host: 'smtp.sendgrid.net', port: 465 }
+
 const form = reactive({
   displayName: '', emailAddress: '', username: '', password: '',
   incomingHost: '', incomingPort: 993,
-  outgoingHost: '', outgoingPort: 465,
+  outgoingHost: SMTP_DEFAULT.host, outgoingPort: SMTP_DEFAULT.port,
   tlsMode: 'TLS',
 })
 
@@ -100,9 +101,10 @@ const testError = ref('')
 // auto-fill helpers
 function autoFillUsername() {
   if (!form.username && form.emailAddress) form.username = form.emailAddress
-}
-function autoFillOutgoing() {
-  if (!form.outgoingHost && form.incomingHost) form.outgoingHost = form.incomingHost
+  if (!form.incomingHost && form.emailAddress) {
+    const domain = form.emailAddress.split('@')[1]
+    if (domain) form.incomingHost = `mail.${domain}`
+  }
 }
 
 async function testConn() {
@@ -126,7 +128,8 @@ async function save() {
     // reset
     Object.assign(form, {
       displayName: '', emailAddress: '', username: '', password: '',
-      incomingHost: '', incomingPort: 993, outgoingHost: '', outgoingPort: 465, tlsMode: 'TLS'
+      incomingHost: '', incomingPort: 993,
+      outgoingHost: SMTP_DEFAULT.host, outgoingPort: SMTP_DEFAULT.port, tlsMode: 'TLS'
     })
     testResult.value = null
   } catch (e: unknown) {
