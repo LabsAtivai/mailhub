@@ -18,7 +18,7 @@ export interface Folder {
 export interface MessageSummary {
   id: string; uid: string; subject: string | null; preview: string | null
   fromName: string | null; fromEmail: string | null; toJson: string
-  date: string; isRead: boolean; isFlagged: boolean; hasAttachments: boolean; size: number | null
+  date: string; isRead: boolean; isFlagged: boolean; isAnswered: boolean; hasAttachments: boolean; size: number | null
   inReplyTo: string | null
   labels: { id: string; name: string; color: string }[]
 }
@@ -240,7 +240,7 @@ export const useMailStore = defineStore('mail', () => {
             id: payload.messageId, uid: '', subject: payload.subject ?? null,
             preview: null, fromName: payload.fromName ?? null, fromEmail: payload.fromEmail ?? null,
             toJson: '[]', date: new Date().toISOString(),
-            isRead: false, isFlagged: false, hasAttachments: false, size: null,
+            isRead: false, isFlagged: false, isAnswered: false, hasAttachments: false, size: null,
             inReplyTo: payload.inReplyTo ?? null, labels: [],
           }, ...messages.value]
         }
@@ -263,15 +263,16 @@ export const useMailStore = defineStore('mail', () => {
       }
     })
 
-    socket.on('mail:updated', (payload: { messageId: string; isRead?: boolean; isFlagged?: boolean }) => {
+    socket.on('mail:updated', (payload: { messageId: string; isRead?: boolean; isFlagged?: boolean; isAnswered?: boolean }) => {
       const patch = (m: MessageSummary): MessageSummary => {
         const wasRead = m.isRead
         const isRead = typeof payload.isRead === 'boolean' ? payload.isRead : m.isRead
         const isFlagged = typeof payload.isFlagged === 'boolean' ? payload.isFlagged : m.isFlagged
+        const isAnswered = typeof payload.isAnswered === 'boolean' ? payload.isAnswered : m.isAnswered
         if (isRead !== wasRead && selectedFolderId.value) {
           updateFolderUnread(selectedFolderId.value, isRead ? -1 : 1)
         }
-        return { ...m, isRead, isFlagged }
+        return { ...m, isRead, isFlagged, isAnswered }
       }
       if (messages.value.some(m => m.id === payload.messageId)) {
         messages.value = messages.value.map(m => m.id === payload.messageId ? patch(m) : m)

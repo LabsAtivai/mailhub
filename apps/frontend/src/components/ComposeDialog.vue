@@ -1,6 +1,6 @@
 <template>
   <Dialog :visible="visible" @update:visible="$emit('update:visible', $event)"
-    :header="isReply ? 'Responder' : isForward ? 'Encaminhar' : 'Nova mensagem'" modal style="width:600px">
+    :header="isReply ? (props.replyAll ? 'Responder a todos' : 'Responder') : isForward ? 'Encaminhar' : 'Nova mensagem'" modal style="width:600px">
 
     <div class="form">
       <div class="field"><label>De</label>
@@ -47,7 +47,8 @@ interface ComposeMessage {
   textBody?: string | null
   htmlBody?: string | null
   messageId?: string | null
-  toJson?: string
+  toJson?: string | null
+  ccJson?: string | null
   attachments?: Array<{ filename: string; size: number }>
 }
 
@@ -55,6 +56,7 @@ const props = defineProps<{
   visible: boolean
   replyTo?: ComposeMessage | null
   forwardMsg?: ComposeMessage | null
+  replyAll?: boolean
 }>()
 const emit = defineEmits(['update:visible', 'sent'])
 const mail = useMailStore()
@@ -64,12 +66,34 @@ const sending = ref(false); const error = ref('')
 const isReply = ref(false)
 const isForward = ref(false)
 
+function parseAddrs(json: string | null | undefined): string[] {
+  if (!json) return []
+  try {
+    const parsed = JSON.parse(json) as Array<{ address?: string; name?: string }>
+    return parsed.map(x => x.address || '').filter(Boolean)
+  } catch { return [] }
+}
+
 watch(() => props.replyTo, (msg) => {
   if (!msg) { isReply.value = false; return }
   isReply.value = true
   isForward.value = false
   form.accountId = mail.selectedAccountId || ''
-  form.to = msg.fromEmail || ''
+
+  if (props.replyAll) {
+    const ownEmail = mail.accounts.find(a => a.id === form.accountId)?.emailAddress?.toLowerCase() ?? ''
+    const toAddrs = parseAddrs(msg.toJson)
+    const ccAddrs = parseAddrs(msg.ccJson)
+    const replyToAddrs = msg.fromEmail ? [msg.fromEmail] : []
+    const toAll = [...new Set([...replyToAddrs, ...toAddrs].filter(e => e.toLowerCase() !== ownEmail))]
+    const ccAll = [...new Set(ccAddrs.filter(e => e.toLowerCase() !== ownEmail))]
+    form.to = toAll.join(', ')
+    form.cc = ccAll.join(', ')
+  } else {
+    form.to = msg.fromEmail || ''
+    form.cc = ''
+  }
+
   form.subject = msg.subject?.startsWith('Re:') ? msg.subject : `Re: ${msg.subject || ''}`
   form.body = `\n\n--- Em ${new Date(msg.date).toLocaleString('pt-BR')}, ${msg.fromEmail} escreveu:\n${msg.textBody || ''}`
 })

@@ -120,9 +120,12 @@
             <span class="msg-date">{{ formatDate(msg.date) }}</span>
           </div>
           <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
-          <div v-if="msg.inReplyTo || msg.labels?.length" class="msg-badges">
+          <div v-if="msg.inReplyTo || msg.isAnswered || msg.labels?.length" class="msg-badges">
             <span v-if="msg.inReplyTo" class="reply-chip">
               <i class="pi pi-reply"></i> Resposta
+            </span>
+            <span v-if="msg.isAnswered" class="answered-chip">
+              <i class="pi pi-check"></i> Respondido
             </span>
             <span v-for="l in msg.labels" :key="l.id" class="msg-label-chip"
               :style="{ background: l.color + '22', borderColor: l.color, color: l.color }">
@@ -165,6 +168,7 @@
             @manage="showLabelManager = true"
             @change="onLabelPickerChange" />
           <Button icon="pi pi-reply" text size="small" label="Responder" @click="openCompose(mail.selectedMessage)" />
+          <Button icon="pi pi-reply" text size="small" label="Resp. todos" @click="openReplyAll(mail.selectedMessage!)" v-tooltip="'Responder a todos'" />
           <Button icon="pi pi-forward" text size="small" label="Enc." @click="openForward(mail.selectedMessage)" />
           <Button :icon="mail.selectedMessage.isFlagged ? 'pi-star-fill' : 'pi-star'"
             text rounded size="small"
@@ -186,6 +190,9 @@
       <div class="viewer-subject">
         <span v-if="mail.selectedMessage.inReplyTo" class="reply-chip reply-chip-viewer">
           <i class="pi pi-reply"></i> Resposta
+        </span>
+        <span v-if="mail.selectedMessage.isAnswered" class="answered-chip answered-chip-viewer">
+          <i class="pi pi-check"></i> Respondido
         </span>
         {{ mail.selectedMessage.subject || '(sem assunto)' }}
       </div>
@@ -254,7 +261,7 @@
     <!-- dialogs -->
     <AddAccountDialog v-model:visible="showAddAccount" @added="mail.fetchAccounts()" />
     <EditAccountDialog v-model:visible="showEditAccount" :account="editingAccount" @saved="mail.fetchAccounts()" />
-    <ComposeDialog v-model:visible="showCompose" :reply-to="replyTo" :forward-msg="forwardMsg" @sent="showCompose = false" />
+    <ComposeDialog v-model:visible="showCompose" :reply-to="replyTo" :forward-msg="forwardMsg" :reply-all="replyAllMode" @sent="showCompose = false" />
     <LabelManagerDialog v-model:visible="showLabelManager" @update:visible="onLabelManagerClose" />
   </div>
 </template>
@@ -290,6 +297,7 @@ const showCompose = ref(false)
 const showLabelManager = ref(false)
 const replyTo = ref<MessageDetail | null>(null)
 const forwardMsg = ref<MessageDetail | null>(null)
+const replyAllMode = ref(false)
 const frameRef = ref<HTMLIFrameElement | null>(null)
 const showRemoteImages = ref(false)
 
@@ -576,10 +584,13 @@ async function onMsgDrop(_e: DragEvent, msgId: string) {
 }
 
 function openCompose(msg: MessageDetail | null) {
-  replyTo.value = msg; forwardMsg.value = null; showCompose.value = true
+  replyTo.value = msg; forwardMsg.value = null; replyAllMode.value = false; showCompose.value = true
+}
+function openReplyAll(msg: MessageDetail) {
+  replyTo.value = msg; forwardMsg.value = null; replyAllMode.value = true; showCompose.value = true
 }
 function openForward(msg: MessageDetail) {
-  forwardMsg.value = msg; replyTo.value = null; showCompose.value = true
+  forwardMsg.value = msg; replyTo.value = null; replyAllMode.value = false; showCompose.value = true
 }
 
 function logout() {
@@ -739,6 +750,16 @@ async function downloadAttachment(att: Attachment) {
 }
 .reply-chip i { font-size: .58rem; }
 .reply-chip-viewer {
+  font-size: .72rem; padding: .08rem .5rem; vertical-align: middle; margin-right: .4rem;
+}
+.answered-chip {
+  display: inline-flex; align-items: center; gap: .2rem;
+  font-size: .62rem; padding: .05rem .38rem; border-radius: 10px;
+  border: 1px solid #2563eb; background: #eff6ff; color: #2563eb;
+  white-space: nowrap; font-weight: 600; line-height: 1.5;
+}
+.answered-chip i { font-size: .58rem; }
+.answered-chip-viewer {
   font-size: .72rem; padding: .08rem .5rem; vertical-align: middle; margin-right: .4rem;
 }
 .read-btn { font-size: .78rem; color: var(--p-text-muted-color); cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .1s; }

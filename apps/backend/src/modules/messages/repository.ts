@@ -11,6 +11,7 @@ export interface MessageListItem {
   date: Date
   isRead: boolean
   isFlagged: boolean
+  isAnswered: boolean
   hasAttachments: boolean
   size: number | null
   inReplyTo: string | null
@@ -20,7 +21,7 @@ export interface MessageListItem {
 const LIST_SELECT = {
   id: true, uid: true, subject: true, preview: true,
   fromName: true, fromEmail: true, toJson: true,
-  date: true, isRead: true, isFlagged: true, hasAttachments: true, size: true,
+  date: true, isRead: true, isFlagged: true, isAnswered: true, hasAttachments: true, size: true,
   inReplyTo: true,
   labels: { select: { label: { select: { id: true, name: true, color: true } } } },
 } as const
@@ -129,5 +130,15 @@ export const messageRepository = {
 
   async findAttachment(attachmentId: string) {
     return prisma.attachment.findUnique({ where: { id: attachmentId } })
+  },
+
+  async findAndMarkAnswered(accountId: string, headerMessageId: string) {
+    const msg = await prisma.message.findFirst({
+      where: { accountId, messageId: headerMessageId },
+      select: { id: true, uid: true, folderId: true },
+    })
+    if (!msg) return null
+    await prisma.message.update({ where: { id: msg.id }, data: { isAnswered: true } })
+    return msg
   },
 }
