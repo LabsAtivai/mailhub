@@ -89,9 +89,34 @@
 
     <!-- ── message list ──────────────────────────────────────────────────── -->
     <section class="msg-list">
-      <div class="msg-list-header">
-        <span class="folder-title">{{ listTitle }}</span>
-        <span class="msg-count">{{ displayMessages.length }}</span>
+      <div class="msg-list-header" :class="{ 'has-selection': mail.selectedIds.size > 0 }">
+        <div class="header-row1">
+          <input type="checkbox" class="select-all-cb"
+            :checked="allVisibleSelected" ref="selectAllRef"
+            v-tooltip="'Selecionar todos'"
+            @change="toggleSelectAll" />
+          <template v-if="mail.selectedIds.size > 0">
+            <span class="bulk-count">{{ mail.selectedIds.size }} selecionado(s)</span>
+            <Button icon="pi pi-times" text rounded size="small"
+              v-tooltip="'Limpar seleção'" @click="mail.clearSelection()" />
+          </template>
+          <template v-else>
+            <span class="folder-title">{{ listTitle }}</span>
+            <span class="msg-count">{{ displayMessages.length }}</span>
+          </template>
+        </div>
+        <div v-if="mail.selectedIds.size > 0" class="header-row2 bulk-actions">
+          <Button icon="pi pi-eye" text rounded size="small"
+            v-tooltip="'Marcar como lido'" @click="mail.bulkMarkRead([...mail.selectedIds], true)" />
+          <Button icon="pi pi-eye-slash" text rounded size="small"
+            v-tooltip="'Marcar como não lido'" @click="mail.bulkMarkRead([...mail.selectedIds], false)" />
+          <Button icon="pi pi-trash" text rounded size="small" severity="danger"
+            v-tooltip="'Excluir selecionados'" @click="mail.bulkDelete([...mail.selectedIds])" />
+          <select class="bulk-label-select" @change="onBulkLabelSelect($event)">
+            <option value="">Aplicar etiqueta...</option>
+            <option v-for="l in labelStore.labels" :key="l.id" :value="l.id">{{ l.name }}</option>
+          </select>
+        </div>
       </div>
 
       <div class="msg-items" @scroll="onListScroll">
@@ -115,33 +140,39 @@
           @dragleave="onMsgDragLeave(msg.id)"
           @drop.prevent="onMsgDrop($event, msg.id)"
           @click="mail.selectMessage(msg.id)">
-          <div class="msg-row1">
-            <span class="msg-sender">{{ msg.fromName || msg.fromEmail || '(sem remetente)' }}</span>
-            <span class="msg-date">{{ formatDate(msg.date) }}</span>
-          </div>
-          <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
-          <div v-if="msg.inReplyTo || msg.isAnswered || msg.labels?.length" class="msg-badges">
-            <span v-if="msg.inReplyTo" class="reply-chip">
-              <i class="pi pi-reply"></i> Resposta
-            </span>
-            <span v-if="msg.isAnswered" class="answered-chip">
-              <i class="pi pi-check"></i> Respondido
-            </span>
-            <span v-for="l in msg.labels" :key="l.id" class="msg-label-chip"
-              :style="{ background: l.color + '22', borderColor: l.color, color: l.color }">
-              {{ l.name }}
-            </span>
-          </div>
-          <div class="msg-row3">
-            <span class="msg-preview">{{ msg.preview || '' }}</span>
-            <i v-if="msg.hasAttachments" class="pi pi-paperclip att-icon"></i>
-            <i class="pi read-btn"
-              :class="msg.isRead ? 'pi-envelope' : 'pi-envelope-open read-unread'"
-              :title="msg.isRead ? 'Marcar como não lido' : 'Marcar como lido'"
-              @click.stop="mail.toggleRead(msg.id, !msg.isRead)"></i>
-            <i class="pi flag-btn"
-              :class="msg.isFlagged ? 'pi-star-fill flagged' : 'pi-star'"
-              @click.stop="mail.toggleFlag(msg.id, !msg.isFlagged)"></i>
+          <input type="checkbox" class="msg-checkbox"
+            :checked="mail.selectedIds.has(msg.id)"
+            @click.stop
+            @change="mail.toggleSelectMessage(msg.id)" />
+          <div class="msg-content">
+            <div class="msg-row1">
+              <span class="msg-sender">{{ msg.fromName || msg.fromEmail || '(sem remetente)' }}</span>
+              <span class="msg-date">{{ formatDate(msg.date) }}</span>
+            </div>
+            <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
+            <div v-if="msg.inReplyTo || msg.isAnswered || msg.labels?.length" class="msg-badges">
+              <span v-if="msg.inReplyTo" class="reply-chip">
+                <i class="pi pi-reply"></i> Resposta
+              </span>
+              <span v-if="msg.isAnswered" class="answered-chip">
+                <i class="pi pi-check"></i> Respondido
+              </span>
+              <span v-for="l in msg.labels" :key="l.id" class="msg-label-chip"
+                :style="{ background: l.color + '22', borderColor: l.color, color: l.color }">
+                {{ l.name }}
+              </span>
+            </div>
+            <div class="msg-row3">
+              <span class="msg-preview">{{ msg.preview || '' }}</span>
+              <i v-if="msg.hasAttachments" class="pi pi-paperclip att-icon"></i>
+              <i class="pi read-btn"
+                :class="msg.isRead ? 'pi-envelope' : 'pi-envelope-open read-unread'"
+                :title="msg.isRead ? 'Marcar como não lido' : 'Marcar como lido'"
+                @click.stop="mail.toggleRead(msg.id, !msg.isRead)"></i>
+              <i class="pi flag-btn"
+                :class="msg.isFlagged ? 'pi-star-fill flagged' : 'pi-star'"
+                @click.stop="mail.toggleFlag(msg.id, !msg.isFlagged)"></i>
+            </div>
           </div>
         </div>
 
@@ -267,7 +298,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, nextTick, watch, watchEffect } from 'vue'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 import InputText from 'primevue/inputtext'
@@ -394,6 +425,41 @@ function renderTextBody(text: string): string {
 const displayMessages = computed(() =>
   searchInput.value ? mail.searchResults : mail.messages
 )
+
+// ── seleção em lote ─────────────────────────────────────────────────────────
+const selectAllRef = ref<HTMLInputElement | null>(null)
+const allVisibleSelected = computed(() =>
+  displayMessages.value.length > 0 && displayMessages.value.every(m => mail.selectedIds.has(m.id))
+)
+const someVisibleSelected = computed(() =>
+  displayMessages.value.some(m => mail.selectedIds.has(m.id))
+)
+watchEffect(() => {
+  if (selectAllRef.value) {
+    selectAllRef.value.indeterminate = someVisibleSelected.value && !allVisibleSelected.value
+  }
+})
+function toggleSelectAll() {
+  if (allVisibleSelected.value) mail.clearSelection()
+  else mail.selectAllMessages(displayMessages.value.map(m => m.id))
+}
+async function onBulkLabelSelect(e: Event) {
+  const labelId = (e.target as HTMLSelectElement).value
+  ;(e.target as HTMLSelectElement).value = ''
+  if (!labelId) return
+  const ids = [...mail.selectedIds]
+  const label = labelStore.labels.find(l => l.id === labelId)
+  try {
+    await Promise.all(ids.map(async id => {
+      const updated = await labelStore.assignLabel(id, labelId)
+      mail.messages = mail.messages.map(m => m.id === id ? { ...m, labels: updated } : m)
+      mail.searchResults = mail.searchResults.map(m => m.id === id ? { ...m, labels: updated } : m)
+    }))
+    toast.add({ severity: 'success', summary: `"${label?.name ?? 'Etiqueta'}" aplicada a ${ids.length} mensagem(ns)`, life: 2500 })
+  } catch {
+    toast.add({ severity: 'error', summary: 'Erro ao aplicar etiqueta em lote', life: 3000 })
+  }
+}
 
 const listTitle = computed(() => {
   if (searchInput.value) return `"${searchInput.value}"`
@@ -698,12 +764,21 @@ async function downloadAttachment(att: Attachment) {
 /* ── message list ─────────────────────────────────────────────────────────── */
 .msg-list { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--p-surface-200); }
 .msg-list-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; flex-direction: column; gap: .3rem;
   padding: .55rem .9rem; border-bottom: 1px solid var(--p-surface-200);
   flex-shrink: 0; min-height: 42px;
 }
-.folder-title { font-weight: 600; font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-row1 { display: flex; align-items: center; gap: .5rem; }
+.header-row2 { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+.folder-title { font-weight: 600; font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .msg-count { font-size: .72rem; color: var(--p-text-muted-color); margin-left: .5rem; white-space: nowrap; }
+.select-all-cb { flex-shrink: 0; cursor: pointer; width: 14px; height: 14px; accent-color: var(--p-primary-color); }
+.bulk-count { font-size: .78rem; font-weight: 600; white-space: nowrap; flex: 1; }
+.bulk-actions :deep(.p-button) { padding: .35rem; }
+.bulk-label-select {
+  font-size: .72rem; border: 1px solid var(--p-surface-300); border-radius: 6px;
+  padding: .25rem .4rem; background: var(--p-surface-0); color: inherit;
+}
 
 .msg-items { flex: 1; overflow-y: auto; }
 .empty-list {
@@ -720,9 +795,12 @@ async function downloadAttachment(att: Attachment) {
 .sk-line.w80 { width: 80%; }
 
 .msg-item {
+  display: flex; align-items: flex-start; gap: .5rem;
   padding: .55rem .9rem; border-bottom: 1px solid var(--p-surface-100);
   cursor: pointer; transition: background .08s, box-shadow .15s;
 }
+.msg-checkbox { flex-shrink: 0; cursor: pointer; width: 14px; height: 14px; margin-top: .3rem; accent-color: var(--p-primary-color); }
+.msg-content { flex: 1; min-width: 0; }
 .msg-item:hover { background: var(--p-surface-50); }
 .msg-item.selected { background: var(--p-primary-50); }
 .msg-item.drop-target {

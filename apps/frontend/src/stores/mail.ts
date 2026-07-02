@@ -41,6 +41,7 @@ export const useMailStore = defineStore('mail', () => {
   const messages = shallowRef<MessageSummary[]>([])
   const nextCursor = ref<string | null>(null)
   const selectedMessage = ref<MessageDetail | null>(null)
+  const selectedIds = ref<Set<string>>(new Set())
   const loadingMessages = ref(false)
   const loadingMessage = ref(false)
   const connected = ref(false)
@@ -80,7 +81,39 @@ export const useMailStore = defineStore('mail', () => {
     searchResults.value = []
     messages.value = []
     nextCursor.value = null
+    clearSelection()
     await loadMessages()
+  }
+
+  // ── multi-select (ações em lote) ─────────────────────────────────────────────
+  function toggleSelectMessage(id: string) {
+    const next = new Set(selectedIds.value)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    selectedIds.value = next
+  }
+
+  function selectAllMessages(ids: string[]) {
+    selectedIds.value = new Set(ids)
+  }
+
+  function clearSelection() {
+    selectedIds.value = new Set()
+  }
+
+  async function bulkMarkRead(ids: string[], isRead: boolean) {
+    // só chama toggleRead para quem realmente muda de estado -- evita
+    // inflar/descontar o contador de não lidos da pasta em duplicidade
+    const targets = ids.filter(id => {
+      const m = messages.value.find(x => x.id === id) || searchResults.value.find(x => x.id === id)
+      return m ? m.isRead !== isRead : true
+    })
+    await Promise.all(targets.map(id => toggleRead(id, isRead)))
+  }
+
+  async function bulkDelete(ids: string[]) {
+    await Promise.all(ids.map(id => deleteMessage(id).catch(() => {})))
+    clearSelection()
   }
 
   async function loadMessages(append = false) {
@@ -102,6 +135,7 @@ export const useMailStore = defineStore('mail', () => {
   // ── search ─────────────────────────────────────────────────────────────────
   async function search(q: string) {
     searchQuery.value = q
+    clearSelection()
     if (!q.trim()) { searchResults.value = []; return }
     try {
       const { data } = await api.get('/messages/search', { params: { q } })
@@ -178,6 +212,11 @@ export const useMailStore = defineStore('mail', () => {
     messages.value = messages.value.filter(x => x.id !== id)
     searchResults.value = searchResults.value.filter(x => x.id !== id)
     if (selectedMessage.value?.id === id) selectedMessage.value = null
+    if (selectedIds.value.has(id)) {
+      const next = new Set(selectedIds.value)
+      next.delete(id)
+      selectedIds.value = next
+    }
   }
 
   function updateFolderUnread(folderId: string, delta: number) {
@@ -203,6 +242,7 @@ export const useMailStore = defineStore('mail', () => {
     searchResults.value = []
     messages.value = items
     nextCursor.value = cursor
+    clearSelection()
   }
 
   // ── socket setup — called ONCE with all account IDs ────────────────────────
@@ -289,6 +329,11 @@ export const useMailStore = defineStore('mail', () => {
       messages.value = messages.value.filter(x => x.id !== payload.messageId)
       searchResults.value = searchResults.value.filter(x => x.id !== payload.messageId)
       if (selectedMessage.value?.id === payload.messageId) selectedMessage.value = null
+      if (selectedIds.value.has(payload.messageId)) {
+        const next = new Set(selectedIds.value)
+        next.delete(payload.messageId)
+        selectedIds.value = next
+      }
     })
 
     socket.on('folder:counts', (payload: { folderId: string; unreadCount: number; totalMessages?: number }) => {
@@ -323,10 +368,11 @@ export const useMailStore = defineStore('mail', () => {
 
   return {
     accounts, foldersByAccount, selectedAccountId, selectedFolderId,
-    messages, nextCursor, selectedMessage, searchResults, searchQuery,
+    messages, nextCursor, selectedMessage, selectedIds, searchResults, searchQuery,
     loadingMessages, loadingMessage, connected, syncProgress,
     fetchAccounts, fetchFolders, selectFolder, loadMessages,
     selectMessage, refreshMessage, toggleFlag, toggleRead, deleteMessage,
     search, loadLabelMessages,
+    toggleSelectMessage, selectAllMessages, clearSelection, bulkMarkRead, bulkDelete,
   }
 })
