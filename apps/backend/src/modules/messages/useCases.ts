@@ -162,6 +162,17 @@ export const messageUseCases = {
     await redis.publish('mailhub:sent:append', JSON.stringify({
       accountId: account.id, messageId: info.messageId,
     }))
+
+    if (dto.inReplyTo) {
+      const original = await repo.findAndMarkAnswered(account.id, dto.inReplyTo)
+      if (original) {
+        await redis.publish('mailhub:flag:update', JSON.stringify({
+          accountId: account.id, messageId: original.id,
+          folderId: original.folderId, uid: original.uid.toString(), isAnswered: true,
+        }))
+      }
+    }
+
     log.info({ accountId: account.id, to: dto.to.length }, 'message sent via smtp')
     return { messageId: info.messageId }
   },

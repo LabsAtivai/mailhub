@@ -27,6 +27,7 @@ const FetchBodySchema = z.object({ messageId: z.string() })
 const FlagUpdateSchema = z.object({
   accountId: z.string(), uid: z.string(), messageId: z.string(),
   isRead: z.boolean().optional(), isFlagged: z.boolean().optional(),
+  isAnswered: z.boolean().optional(),
 })
 const MoveSchema = z.object({
   accountId: z.string(), uid: z.string(), messageId: z.string(),
@@ -89,10 +90,10 @@ sub.on('message', async (channel: string, message: string) => {
   }
 })
 
-interface FlagPayload { accountId: string; uid: string; messageId: string; isRead?: boolean; isFlagged?: boolean }
+interface FlagPayload { accountId: string; uid: string; messageId: string; isRead?: boolean; isFlagged?: boolean; isAnswered?: boolean }
 
 async function handleFlagUpdate(payload: FlagPayload) {
-  const { accountId, uid, isRead, isFlagged, messageId } = payload
+  const { accountId, uid, isRead, isFlagged, isAnswered, messageId } = payload
   const msg = await prisma.message.findUnique({ where: { id: messageId }, include: { folder: true } })
   if (!msg) return
 
@@ -107,6 +108,10 @@ async function handleFlagUpdate(payload: FlagPayload) {
       if (isFlagged) await client.messageFlagsAdd(uid, ['\\Flagged'], { uid: true })
       else await client.messageFlagsRemove(uid, ['\\Flagged'], { uid: true })
     }
+    if (typeof isAnswered === 'boolean') {
+      if (isAnswered) await client.messageFlagsAdd(uid, ['\\Answered'], { uid: true })
+      else await client.messageFlagsRemove(uid, ['\\Answered'], { uid: true })
+    }
   } finally {
     lock.release()
   }
@@ -114,6 +119,7 @@ async function handleFlagUpdate(payload: FlagPayload) {
   const update: Record<string, unknown> = { accountId, messageId }
   if (typeof isRead === 'boolean') update.isRead = isRead
   if (typeof isFlagged === 'boolean') update.isFlagged = isFlagged
+  if (typeof isAnswered === 'boolean') update.isAnswered = isAnswered
   await redis.publish('mail:updated', JSON.stringify(update))
 }
 
