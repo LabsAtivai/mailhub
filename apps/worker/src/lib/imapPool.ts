@@ -1,7 +1,7 @@
 import { scope } from './logger'
 import { ImapFlow, ImapFlowOptions } from 'imapflow'
 
-export type ClientKind = 'ops' | 'idle'
+export type ClientKind = 'ops' | 'idle' | 'interactive'
 
 const log = scope('imap-pool')
 
@@ -49,7 +49,7 @@ export class ImapPool {
   }
 
   async disconnect(accountId: string): Promise<void> {
-    for (const kind of ['ops', 'idle'] as ClientKind[]) {
+    for (const kind of ['ops', 'idle', 'interactive'] as ClientKind[]) {
       const k = this.key(accountId, kind)
       const client = this.clients.get(k)
       if (client) {

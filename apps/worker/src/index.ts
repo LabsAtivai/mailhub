@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, fetchBody, ensureIdle, getOpsClient } from './sync/syncAccount'
+import { syncAccount, fetchBody, ensureIdle, getInteractiveClient } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 
@@ -97,7 +97,7 @@ async function handleFlagUpdate(payload: FlagPayload) {
   const msg = await prisma.message.findUnique({ where: { id: messageId }, include: { folder: true } })
   if (!msg) return
 
-  const client = await getOpsClient(accountId)
+  const client = await getInteractiveClient(accountId)
   const lock = await client.getMailboxLock(msg.folder.path)
   try {
     if (typeof isRead === 'boolean') {
@@ -133,7 +133,7 @@ async function handleMove(payload: MovePayload) {
   ])
   if (!source || !target) return
 
-  const client = await getOpsClient(accountId)
+  const client = await getInteractiveClient(accountId)
   const lock = await client.getMailboxLock(source.path)
   try {
     await client.messageMove(uid, target.path, { uid: true })
@@ -152,7 +152,7 @@ async function handleDelete(payload: DeletePayload) {
   const source = await prisma.folder.findUnique({ where: { id: folderId } })
   if (!source) return
 
-  const client = await getOpsClient(accountId)
+  const client = await getInteractiveClient(accountId)
   const lock = await client.getMailboxLock(source.path)
   try {
     if (trashFolderId) {
@@ -190,7 +190,7 @@ interface AttachmentPayload {
 
 async function handleFetchAttachment(payload: AttachmentPayload) {
   const { accountId, folderPath, uid, attachmentId } = payload
-  const client = await getOpsClient(accountId)
+  const client = await getInteractiveClient(accountId)
   const lock = await client.getMailboxLock(folderPath)
   try {
     const rawMsg = await client.fetchOne(uid, { source: true }, { uid: true })

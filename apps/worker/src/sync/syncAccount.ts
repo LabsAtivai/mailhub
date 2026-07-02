@@ -36,12 +36,24 @@ function imapOptions(account: ImapAccount): ImapFlowOptions {
   return opts
 }
 
+// Usada só pelo sync periódico em background — nunca por ações disparadas pelo usuário,
+// pra não enfileirar leituras interativas atrás de um resync em andamento.
 export async function getOpsClient(accountId: string): Promise<ImapFlow> {
   const account = await prisma.mailAccount.findUnique({ where: { id: accountId } })
   if (!account) throw new Error('Account not found')
   const existing = pool.get(accountId, 'ops')
   if (existing) return existing
   return pool.connect(accountId, 'ops', imapOptions(account as ImapAccount))
+}
+
+// Usada por ações do usuário (abrir e-mail, marcar como lido, mover, deletar, anexo)
+// — conexão dedicada, isolada do resync em background (AP-004: 1 IDLE + 2 ops).
+export async function getInteractiveClient(accountId: string): Promise<ImapFlow> {
+  const account = await prisma.mailAccount.findUnique({ where: { id: accountId } })
+  if (!account) throw new Error('Account not found')
+  const existing = pool.get(accountId, 'interactive')
+  if (existing) return existing
+  return pool.connect(accountId, 'interactive', imapOptions(account as ImapAccount))
 }
 
 // ── Full / incremental sync ──────────────────────────────────────────────────
@@ -398,7 +410,7 @@ export async function fetchBody(messageId: string): Promise<void> {
   })
   if (!msg || msg.bodyFetchedAt) return
 
-  const client = await getOpsClient(msg.folder.account.id)
+  const client = await getInteractiveClient(msg.folder.account.id)
   const lock = await client.getMailboxLock(msg.folder.path)
   try {
     const rawMsg = await client.fetchOne(String(msg.uid), { source: true }, { uid: true })
