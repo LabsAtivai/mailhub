@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, fetchBody, ensureIdle, getInteractiveClient } from './sync/syncAccount'
+import { syncAccount, fetchBody, refreshFlags, ensureIdle, getInteractiveClient } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 
@@ -14,6 +14,7 @@ const sub = redis.duplicate()
 sub.subscribe(
   'mailhub:sync:start',
   'mailhub:fetch:body',
+  'mailhub:flag:refresh',
   'mailhub:flag:update',
   'mailhub:message:move',
   'mailhub:message:delete',
@@ -24,6 +25,9 @@ sub.subscribe(
 
 const SyncStartSchema = z.object({ accountId: z.string() })
 const FetchBodySchema = z.object({ messageId: z.string() })
+const FlagRefreshSchema = z.object({
+  messageId: z.string(), accountId: z.string(), folderId: z.string(), uid: z.string(),
+})
 const FlagUpdateSchema = z.object({
   accountId: z.string(), uid: z.string(), messageId: z.string(),
   isRead: z.boolean().optional(), isFlagged: z.boolean().optional(),
@@ -56,6 +60,11 @@ sub.on('message', async (channel: string, message: string) => {
       case 'mailhub:fetch:body': {
         const p = FetchBodySchema.parse(raw)
         await fetchBody(p.messageId)
+        break
+      }
+      case 'mailhub:flag:refresh': {
+        const p = FlagRefreshSchema.parse(raw)
+        await refreshFlags(p.messageId)
         break
       }
       case 'mailhub:flag:update': {

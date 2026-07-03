@@ -53,6 +53,15 @@ export const messageUseCases = {
     const msg = await requireOwnedMessage(messageId, userId)
     const labels = msg.labels.map(ml => ml.label)
 
+    // Checa a flag \Answered/\Seen direto no IMAP ao abrir — a sincronização
+    // periódica só revê flags dos últimos 90 dias, então uma resposta feita
+    // por fora (ex: webmail anterior) em mensagem mais antiga só é percebida
+    // aqui, na hora de abrir, evitando responder algo já respondido.
+    await redis.publish('mailhub:flag:refresh', JSON.stringify({
+      messageId: msg.id, accountId: msg.folder.account.id,
+      folderId: msg.folderId, uid: msg.uid.toString(),
+    }))
+
     if (!msg.bodyFetchedAt) {
       await redis.publish('mailhub:fetch:body', JSON.stringify({ messageId: msg.id }))
       return { ...msg, labels, bodyFetching: true }

@@ -455,3 +455,41 @@ export async function fetchBody(messageId: string): Promise<void> {
     lock.release()
   }
 }
+
+// ── Live flag refresh (on-demand, ao abrir mensagem) ─────────────────────────
+// A sincronização periódica só reavalia flags dos últimos 90 dias (ver
+// syncMessages). Mensagens mais antigas respondidas fora do MailHub (ex:
+// webmail anterior) nunca teriam isRead/isAnswered atualizado sem isso.
+export async function refreshFlags(messageId: string): Promise<void> {
+  const msg = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { folder: { include: { account: true } } }
+  })
+  if (!msg) return
+
+  const client = await getInteractiveClient(msg.folder.account.id)
+  const lock = await client.getMailboxLock(msg.folder.path)
+  try {
+    const rawMsg = await client.fetchOne(String(msg.uid), { flags: true }, { uid: true })
+    if (!rawMsg) return
+    const flags: Set<string> = (rawMsg as unknown as { flags?: Set<string> }).flags ?? new Set()
+    const isRead = flags.has('\\Seen')
+    const isFlagged = flags.has('\\Flagged')
+    const isAnswered = flags.has('\\Answered')
+
+    if (isRead === msg.isRead && isFlagged === msg.isFlagged && isAnswered === msg.isAnswered) return
+
+    await prisma.message.update({
+      where: { id: messageId },
+      data: { isRead, isFlagged, isAnswered },
+    })
+    await redis.publish('mail:updated', JSON.stringify({
+      messageId, accountId: msg.accountId, isRead, isFlagged, isAnswered,
+    }))
+    if (isRead !== msg.isRead) await refreshCounts(msg.accountId, msg.folderId)
+  } catch (err: unknown) {
+    log.warn({ messageId, err: err instanceof Error ? err.message : String(err) }, 'flag refresh failed')
+  } finally {
+    lock.release()
+  }
+}
