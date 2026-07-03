@@ -117,7 +117,7 @@ function parseAddrs(json: string | null | undefined): string[] {
   } catch { return [] }
 }
 
-watch(() => props.replyTo, (msg) => {
+watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
   if (!msg) { isReply.value = false; return }
   isReply.value = true
   isForward.value = false
