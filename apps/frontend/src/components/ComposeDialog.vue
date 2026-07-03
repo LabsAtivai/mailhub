@@ -18,6 +18,20 @@
       <div class="field"><label>Mensagem</label>
         <Textarea v-model="form.body" rows="10" fluid auto-resize /></div>
 
+      <div class="field">
+        <input type="file" ref="fileInputRef" multiple style="display:none" @change="onFilesSelected" />
+        <Button label="Anexar arquivo" icon="pi pi-paperclip" text size="small"
+          style="align-self:flex-start" @click="fileInputRef?.click()" />
+        <div v-if="attachments.length > 0" class="attach-list">
+          <div v-for="(att, idx) in attachments" :key="idx" class="attach-chip">
+            <i class="pi pi-file"></i>
+            <span class="attach-name">{{ att.name }}</span>
+            <span class="attach-size">{{ formatSize(att.size) }}</span>
+            <i class="pi pi-times remove-attach" @click="removeAttachment(idx)"></i>
+          </div>
+        </div>
+      </div>
+
       <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     </div>
 
@@ -65,6 +79,35 @@ const form = reactive({ accountId: '', to: '', cc: '', subject: '', body: '' })
 const sending = ref(false); const error = ref('')
 const isReply = ref(false)
 const isForward = ref(false)
+const attachments = ref<File[]>([])
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)}KB`
+  return `${(bytes / 1048576).toFixed(1)}MB`
+}
+
+function onFilesSelected(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  attachments.value = [...attachments.value, ...files]
+  input.value = ''
+}
+
+function removeAttachment(idx: number) {
+  attachments.value = attachments.value.filter((_, i) => i !== idx)
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
 function parseAddrs(json: string | null | undefined): string[] {
   if (!json) return []
@@ -115,8 +158,15 @@ function escapeHtml(s: string): string {
 async function send() {
   if (!form.accountId) { error.value = 'Selecione uma conta'; return }
   if (!form.to.trim()) { error.value = 'Destinatário obrigatório'; return }
+  const totalBytes = attachments.value.reduce((sum, f) => sum + f.size, 0)
+  if (totalBytes > MAX_ATTACHMENTS_BYTES) { error.value = 'Anexos excedem o limite de 20MB'; return }
   error.value = ''; sending.value = true
   try {
+    const encodedAttachments = await Promise.all(attachments.value.map(async f => ({
+      filename: f.name,
+      mimeType: f.type || undefined,
+      content: await fileToBase64(f),
+    })))
     await api.post('/messages/send', {
       accountId: form.accountId,
       to: form.to.split(',').map(s => s.trim()).filter(Boolean),
@@ -125,10 +175,12 @@ async function send() {
       html: escapeHtml(form.body).replace(/\n/g, '<br>'),
       text: form.body,
       inReplyTo: props.replyTo?.messageId ?? props.forwardMsg?.messageId,
+      attachments: encodedAttachments.length > 0 ? encodedAttachments : undefined,
     })
     emit('sent')
     emit('update:visible', false)
     Object.assign(form, { to: '', cc: '', subject: '', body: '' })
+    attachments.value = []
   } catch (e: unknown) {
     error.value = extractError(e, 'Erro ao enviar')
   } finally { sending.value = false }
@@ -139,4 +191,15 @@ async function send() {
 .form { display: flex; flex-direction: column; gap: .75rem; }
 .field { display: flex; flex-direction: column; gap: .35rem; }
 .field label { font-size: .8rem; font-weight: 500; }
+.attach-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .3rem; }
+.attach-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: var(--p-surface-50); border: 1px solid var(--p-surface-200);
+  border-radius: 8px; padding: .3rem .6rem; font-size: .78rem; max-width: 260px;
+}
+.attach-chip i.pi-file { font-size: .75rem; color: var(--p-text-muted-color); }
+.attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.attach-size { color: var(--p-text-muted-color); white-space: nowrap; font-size: .7rem; }
+.remove-attach { cursor: pointer; font-size: .7rem; color: var(--p-text-muted-color); }
+.remove-attach:hover { color: var(--p-red-500); }
 </style>

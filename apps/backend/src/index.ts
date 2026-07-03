@@ -47,7 +47,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }))
 app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }))
-app.use(express.json({ limit: '26mb' }))
+app.use(express.json({ limit: '28mb' })) // acomoda anexos de até 20MB (base64 infla ~33%)
 app.use(cookieParser())
 
 // ── healthcheck (antes das rotas autenticadas) ──────────────────────────────

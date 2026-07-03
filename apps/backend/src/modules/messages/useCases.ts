@@ -8,9 +8,12 @@ const log = scope('messages')
 
 export class ForbiddenError extends Error {}
 export class NotFoundError extends Error {}
+export class ValidationError extends Error {}
 export class SmtpError extends Error {
   constructor(message: string) { super(message); this.name = 'SmtpError' }
 }
+
+const MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024 // 20MB, alinhado ao limite comum de provedores de e-mail
 
 async function requireOwnedMessage(messageId: string, userId: string) {
   const msg = await repo.findMessageWithOwner(messageId)
@@ -122,9 +125,20 @@ export const messageUseCases = {
   async send(userId: string, dto: {
     accountId: string; to: string[]; cc?: string[]
     subject: string; html: string; text?: string; inReplyTo?: string
+    attachments?: Array<{ filename: string; mimeType?: string; content: string }>
   }) {
     const account = await repo.findAccountForUser(dto.accountId, userId)
     if (!account) throw new NotFoundError('Conta não encontrada')
+
+    const attachments = (dto.attachments ?? []).map(a => ({
+      filename: a.filename,
+      content: Buffer.from(a.content, 'base64'),
+      contentType: a.mimeType,
+    }))
+    const totalBytes = attachments.reduce((sum, a) => sum + a.content.length, 0)
+    if (totalBytes > MAX_ATTACHMENTS_BYTES) {
+      throw new ValidationError('Anexos excedem o limite de 20MB')
+    }
 
     const isSendGrid = account.outgoingHost === 'smtp.sendgrid.net'
     const smtpAuth = isSendGrid
@@ -148,6 +162,7 @@ export const messageUseCases = {
         text: dto.text || '',
         inReplyTo: dto.inReplyTo,
         references: dto.inReplyTo,
+        attachments: attachments.length > 0 ? attachments : undefined,
       })
     } catch (err: unknown) {
       const e = err as Record<string, unknown>

@@ -9,6 +9,12 @@ export const MoveMessageSchema = z.object({
   folderId: z.string().uuid(),
 })
 
+export const SendAttachmentSchema = z.object({
+  filename: z.string().min(1),
+  mimeType: z.string().optional(),
+  content: z.string(), // base64
+})
+
 export const SendMailSchema = z.object({
   accountId: z.string().uuid(),
   to: z.array(z.string().email()).min(1),
@@ -17,6 +23,7 @@ export const SendMailSchema = z.object({
   html: z.string(),
   text: z.string().optional(),
   inReplyTo: z.string().optional(),
+  attachments: z.array(SendAttachmentSchema).max(10).optional(),
 })
 
 export const AssignLabelSchema = z.object({

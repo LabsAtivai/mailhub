@@ -1,7 +1,7 @@
 import { Router, Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
-import { messageUseCases as uc, NotFoundError, ForbiddenError, SmtpError } from './useCases'
+import { messageUseCases as uc, NotFoundError, ForbiddenError, SmtpError, ValidationError } from './useCases'
 import { SetFlagsSchema, MoveMessageSchema, SendMailSchema, AssignLabelSchema } from './dto'
 import { scope } from '../../lib/logger'
 
@@ -22,6 +22,7 @@ function handle(res: Response, err: unknown) {
   if (err instanceof NotFoundError) { res.status(404).json({ error: err.message }); return }
   if (err instanceof ForbiddenError) { res.status(403).json({ error: err.message }); return }
   if (err instanceof SmtpError) { res.status(502).json({ error: `Erro no envio: ${err.message}` }); return }
+  if (err instanceof ValidationError) { res.status(400).json({ error: err.message }); return }
   log.error({ err }, 'unhandled error in messages module')
   res.status(500).json({ error: 'Internal server error' })
 }
