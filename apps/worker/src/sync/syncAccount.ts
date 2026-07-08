@@ -11,6 +11,18 @@ const log = scope('sync')
 const SYNC_DAYS = 90
 const BATCH_SIZE = 200
 
+// Alguns provedores (ex: HostGator/cPanel) devolvem uma cópia da mensagem
+// recém-enviada via SMTP diretamente na INBOX (não só na pasta Sent), o que
+// fazia essa cópia ser tratada como e-mail novo recebido (badge de não lido +
+// notificação), embora seja apenas o próprio envio ecoando de volta.
+// Guardamos o Message-ID de envios recentes para reconhecer e suprimir isso.
+const SENT_MSGID_TTL_SECONDS = 60 * 60
+const sentMsgIdKey = (accountId: string, messageId: string) => `mailhub:sentmsgid:${accountId}:${messageId}`
+
+export async function markRecentlySent(accountId: string, messageId: string): Promise<void> {
+  await redis.set(sentMsgIdKey(accountId, messageId), '1', 'EX', SENT_MSGID_TTL_SECONDS)
+}
+
 const IMAP_PROXY = process.env.IMAP_PROXY_URL || ''
 
 interface ImapAccount {
@@ -236,15 +248,27 @@ async function upsertBatch(
   })
   const existingByUid = new Map(existing.map(e => [e.uid.toString(), e.id]))
 
+  const candidateMessageIds = msgs
+    .map(m => (m.envelope as Envelope | undefined)?.messageId)
+    .filter((id): id is string => !!id)
+  const selfSentFlags = candidateMessageIds.length > 0
+    ? await redis.mget(candidateMessageIds.map(id => sentMsgIdKey(accountId, id)))
+    : []
+  const selfSentMessageIds = new Set(
+    candidateMessageIds.filter((_, i) => selfSentFlags[i])
+  )
+
   const toCreate: Array<Record<string, unknown>> = []
   const toUpdate: Array<{ id: string; isRead: boolean; isFlagged: boolean; isAnswered: boolean }> = []
+  const suppressNotifyMessageIds = new Set<string>()
 
   for (const msg of msgs) {
     const uid = BigInt(msg.uid as number)
     const flags: Set<string> = (msg.flags as Set<string>) ?? new Set()
     const env = (msg.envelope ?? {}) as Envelope
+    const isSelfSentCopy = !!env.messageId && selfSentMessageIds.has(env.messageId)
 
-    const isRead = flags.has('\\Seen')
+    const isRead = flags.has('\\Seen') || isSelfSentCopy
     const isFlagged = flags.has('\\Flagged')
     const isAnswered = flags.has('\\Answered')
 
@@ -266,6 +290,7 @@ async function upsertBatch(
         hasAttachments: hasAttach(msg.bodyStructure),
         size: (msg.size as number) || 0,
       })
+      if (isSelfSentCopy && env.messageId) suppressNotifyMessageIds.add(env.messageId)
     }
   }
 
@@ -285,9 +310,10 @@ async function upsertBatch(
   if (notify && toCreate.length > 0) {
     const created = await prisma.message.findMany({
       where: { accountId, folderId, uid: { in: toCreate.map(m => m.uid as bigint) } },
-      select: { id: true, uid: true, subject: true, fromName: true, fromEmail: true, inReplyTo: true }
+      select: { id: true, uid: true, subject: true, fromName: true, fromEmail: true, inReplyTo: true, messageId: true }
     })
     for (const msg of created) {
+      if (msg.messageId && suppressNotifyMessageIds.has(msg.messageId)) continue
       await redis.publish('mail:new', JSON.stringify({
         accountId, folderId, messageId: msg.id,
         subject: msg.subject, fromEmail: msg.fromEmail, fromName: msg.fromName,

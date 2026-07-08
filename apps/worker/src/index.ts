@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, fetchBody, refreshFlags, ensureIdle, getInteractiveClient } from './sync/syncAccount'
+import { syncAccount, fetchBody, refreshFlags, ensureIdle, getInteractiveClient, markRecentlySent } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 
@@ -180,7 +180,12 @@ async function handleDelete(payload: DeletePayload) {
 
 // ── sent append: copy sent message to IMAP Sent folder ──────────────────────
 async function handleSentAppend(payload: { accountId: string; messageId?: string }) {
-  const { accountId } = payload
+  const { accountId, messageId } = payload
+  // Alguns provedores devolvem uma cópia do envio direto na INBOX; marcar o
+  // Message-ID como "recém-enviado" evita que essa cópia seja tratada como
+  // e-mail novo recebido (ver syncAccount.ts).
+  if (messageId) await markRecentlySent(accountId, messageId)
+
   const sentFolder = await prisma.folder.findFirst({
     where: { accountId, OR: [{ specialUse: '\\Sent' }, { path: 'Sent' }, { path: 'INBOX.Sent' }] },
   })
