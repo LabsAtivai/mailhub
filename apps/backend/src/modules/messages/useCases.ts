@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import MailComposer from 'nodemailer/lib/mail-composer'
 import { messageRepository as repo } from './repository'
 import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
@@ -160,19 +161,21 @@ export const messageUseCases = {
       auth: smtpAuth,
     })
 
+    const mailOptions = {
+      from: `${account.displayName} <${account.emailAddress}>`,
+      to: dto.to.join(', '),
+      cc: dto.cc?.join(', '),
+      subject: dto.subject,
+      html: dto.html,
+      text: dto.text || '',
+      inReplyTo: dto.inReplyTo,
+      references: dto.inReplyTo,
+      attachments: attachments.length > 0 ? attachments : undefined,
+    }
+
     let info
     try {
-      info = await transporter.sendMail({
-        from: `${account.displayName} <${account.emailAddress}>`,
-        to: dto.to.join(', '),
-        cc: dto.cc?.join(', '),
-        subject: dto.subject,
-        html: dto.html,
-        text: dto.text || '',
-        inReplyTo: dto.inReplyTo,
-        references: dto.inReplyTo,
-        attachments: attachments.length > 0 ? attachments : undefined,
-      })
+      info = await transporter.sendMail(mailOptions)
     } catch (err: unknown) {
       const e = err as Record<string, unknown>
       const code = e?.responseCode ?? e?.code ?? ''
@@ -181,6 +184,18 @@ export const messageUseCases = {
       throw new SmtpError(String(msg))
     } finally {
       transporter.close()
+    }
+
+    // O worker não tem os dados da mensagem (from/to/html/anexos) para montar o
+    // RFC822 sozinho, então geramos o mesmo MIME que foi enviado e deixamos no
+    // Redis por um curto período pra ele fazer o APPEND na pasta Sent via IMAP.
+    // Sem isso, a mensagem enviada nunca aparecia em "Enviados" (o provedor
+    // não copia automaticamente o que foi mandado por SMTP autenticado).
+    try {
+      const raw = await new MailComposer(mailOptions).compile().build()
+      await redis.set(`mailhub:sentraw:${account.id}:${info.messageId}`, raw.toString('base64'), 'EX', 300)
+    } catch (err: unknown) {
+      log.warn({ accountId: account.id, err: err instanceof Error ? err.message : String(err) }, 'failed to build raw MIME for Sent append')
     }
 
     await redis.publish('mailhub:sent:append', JSON.stringify({

@@ -193,6 +193,23 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
     logger.warn({ accountId }, 'no Sent folder found, skipping append')
     return
   }
+
+  if (messageId) {
+    const rawKey = `mailhub:sentraw:${accountId}:${messageId}`
+    const rawBase64 = await redis.get(rawKey)
+    if (rawBase64) {
+      try {
+        const client = await getInteractiveClient(accountId)
+        await client.append(sentFolder.path, Buffer.from(rawBase64, 'base64'), ['\\Seen'])
+        await redis.del(rawKey)
+      } catch (err: unknown) {
+        logger.error({ accountId, messageId, err: err instanceof Error ? err.message : String(err) }, 'failed to append sent message to IMAP Sent folder')
+      }
+    } else {
+      logger.warn({ accountId, messageId }, 'no raw MIME cached for sent message, cannot append to Sent')
+    }
+  }
+
   await syncAccount(accountId)
 }
 
