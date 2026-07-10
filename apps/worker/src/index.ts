@@ -273,7 +273,7 @@ async function runWithConcurrency(
   }
 }
 
-// ── periodic incremental sync every 2 minutes ───────────────────────────────
+// ── periodic incremental sync every 10 minutes ──────────────────────────────
 setInterval(async () => {
   try {
     const accounts = await prisma.mailAccount.findMany({
@@ -285,7 +285,7 @@ setInterval(async () => {
     const errMsg = err instanceof Error ? (err as Error).message : String(err)
     logger.error({ err: errMsg }, 'periodic sync scheduler error')
   }
-}, 2 * 60 * 1000)
+}, 10 * 60 * 1000)
 
 // ── boot: reset stale SYNCING states + sync all accounts ────────────────────
 prisma.mailAccount.updateMany({
