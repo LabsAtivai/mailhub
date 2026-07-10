@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from 'express'
+import argon2 from 'argon2'
 import { prisma } from '../../lib/prisma'
 import { encrypt } from '../../lib/crypto'
 import { redis } from '../../lib/redis'
@@ -65,9 +66,11 @@ router.get('/users/:id', wrap(async (req, res) => {
   res.json(user)
 }))
 
-// PATCH /admin/users/:id — update user (role, name)
+// PATCH /admin/users/:id — update user (name, email, password, role)
 const UpdateUserSchema = z.object({
   name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  password: z.string().min(8).optional(),
   role: z.enum(['user', 'admin']).optional(),
 })
 
@@ -76,12 +79,33 @@ router.patch('/users/:id', wrap(async (req, res) => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   const user = await prisma.user.findUnique({ where: { id: req.params.id } })
   if (!user) { res.status(404).json({ error: 'Usuário não encontrado' }); return }
+
+  const { password, email, ...rest } = parsed.data
+  const data: Record<string, unknown> = { ...rest }
+
+  if (email && email !== user.email) {
+    const emailTaken = await prisma.user.findUnique({ where: { email } })
+    if (emailTaken) { res.status(409).json({ error: 'Email já está em uso' }); return }
+    data.email = email
+  }
+
+  if (password) {
+    data.passwordHash = await argon2.hash(password, {
+      type: argon2.argon2id,
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 1,
+    })
+    // Senha trocada pelo admin: derruba sessões existentes por segurança.
+    await prisma.refreshToken.deleteMany({ where: { userId: req.params.id } })
+  }
+
   const updated = await prisma.user.update({
     where: { id: req.params.id },
-    data: parsed.data,
+    data,
     select: { id: true, name: true, email: true, role: true },
   })
-  log.info({ adminId: req.userId, targetId: req.params.id, changes: parsed.data }, 'user updated by admin')
+  log.info({ adminId: req.userId, targetId: req.params.id, changes: Object.keys(parsed.data) }, 'user updated by admin')
   res.json(updated)
 }))
 

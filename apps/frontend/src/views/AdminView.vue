@@ -45,7 +45,7 @@
       <!-- USERS TAB -->
       <div v-if="tab === 'users'" class="tab-content">
         <div class="toolbar">
-          <InputText v-model="userSearch" placeholder="Buscar usuario..." class="search-input" />
+          <InputText v-model="userSearch" placeholder="Buscar por nome ou email..." class="search-input" />
         </div>
 
         <table class="data-table">
@@ -60,7 +60,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in filteredUsers" :key="u.id">
+            <tr v-for="u in visibleUsers" :key="u.id">
               <td>{{ u.name }}</td>
               <td>{{ u.email }}</td>
               <td>
@@ -71,6 +71,8 @@
               <td class="actions">
                 <Button icon="pi pi-eye" text rounded size="small" v-tooltip="'Ver contas'"
                   @click="viewUser(u)" />
+                <Button icon="pi pi-key" text rounded size="small"
+                  v-tooltip="'Editar usuario/senha'" @click="openEditUser(u)" />
                 <Button v-if="u.role === 'user'" icon="pi pi-shield" text rounded size="small"
                   v-tooltip="'Tornar admin'" @click="setRole(u.id, 'admin')" />
                 <Button v-else icon="pi pi-user" text rounded size="small"
@@ -81,6 +83,9 @@
             </tr>
           </tbody>
         </table>
+        <p class="preview-hint" v-if="filteredUsers.length > visibleUsers.length">
+          Mostrando {{ visibleUsers.length }} de {{ filteredUsers.length }} resultados — refine a busca para encontrar outros usuarios.
+        </p>
       </div>
 
       <!-- ACCOUNTS TAB -->
@@ -149,6 +154,29 @@
           </table>
           <p v-else style="color:#888">Nenhuma conta cadastrada.</p>
         </div>
+      </Dialog>
+
+      <!-- edit user credentials dialog -->
+      <Dialog v-model:visible="showEditUser" header="Editar usuario" modal :style="{ width: '440px' }">
+        <div class="form-grid">
+          <div class="field">
+            <label>Nome</label>
+            <InputText v-model="editForm.name" style="width:100%" />
+          </div>
+          <div class="field">
+            <label>Email (login)</label>
+            <InputText v-model="editForm.email" style="width:100%" />
+          </div>
+          <div class="field">
+            <label>Nova senha</label>
+            <InputText v-model="editForm.password" type="password" placeholder="Deixe em branco para manter a atual" style="width:100%" />
+          </div>
+        </div>
+        <div v-if="editError" class="form-error">{{ editError }}</div>
+        <template #footer>
+          <Button label="Cancelar" text @click="showEditUser = false" />
+          <Button label="Salvar" :loading="savingEditUser" @click="saveUserEdit" />
+        </template>
       </Dialog>
 
       <!-- add account dialog -->
@@ -263,6 +291,12 @@ const showUserDetail = ref(false)
 const selectedUser = ref<AdminUser | null>(null)
 const userDetail = ref<{ email: string; role: string; createdAt: string; accounts: AdminAccount[] } | null>(null)
 
+const USERS_PREVIEW_LIMIT = 10
+const showEditUser = ref(false)
+const savingEditUser = ref(false)
+const editError = ref('')
+const editForm = reactive({ id: '', name: '', email: '', password: '' })
+
 const showAddAccount = ref(false)
 const addingAccount = ref(false)
 const addError = ref('')
@@ -284,6 +318,8 @@ const filteredUsers = computed(() => {
     u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
   )
 })
+
+const visibleUsers = computed(() => filteredUsers.value.slice(0, USERS_PREVIEW_LIMIT))
 
 const filteredAccounts = computed(() => {
   if (!accountSearch.value) return accounts.value
@@ -327,6 +363,37 @@ async function setRole(userId: string, role: string) {
   await api.patch(`/admin/users/${userId}`, { role })
   toast.add({ severity: 'success', summary: `Role alterado para ${role}`, life: 2000 })
   await loadData()
+}
+
+function openEditUser(u: AdminUser) {
+  editError.value = ''
+  Object.assign(editForm, { id: u.id, name: u.name, email: u.email, password: '' })
+  showEditUser.value = true
+}
+
+async function saveUserEdit() {
+  editError.value = ''
+  if (!editForm.name.trim()) { editError.value = 'Nome obrigatorio'; return }
+  if (!editForm.email.trim()) { editError.value = 'Email obrigatorio'; return }
+  if (editForm.password && editForm.password.length < 8) {
+    editError.value = 'Nova senha precisa de pelo menos 8 caracteres'; return
+  }
+  savingEditUser.value = true
+  try {
+    await api.patch(`/admin/users/${editForm.id}`, {
+      name: editForm.name,
+      email: editForm.email,
+      password: editForm.password || undefined,
+    })
+    toast.add({ severity: 'success', summary: 'Usuario atualizado', life: 2000 })
+    showEditUser.value = false
+    await loadData()
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { error?: string } } }
+    editError.value = err?.response?.data?.error ? String(err.response.data.error) : 'Erro ao salvar'
+  } finally {
+    savingEditUser.value = false
+  }
 }
 
 function confirmDeleteUser(u: AdminUser) {
@@ -465,6 +532,8 @@ onMounted(loadData)
 .status-badge.syncing { background: #e3f2fd; color: #1565c0; }
 .status-badge.error { background: #ffebee; color: #c62828; }
 .status-badge.pending { background: #fff3e0; color: #e65100; }
+
+.preview-hint { margin-top: .6rem; font-size: .78rem; color: #888; }
 
 .error-row {
   margin-top: .5rem; padding: .5rem .8rem;
