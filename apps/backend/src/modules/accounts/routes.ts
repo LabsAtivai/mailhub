@@ -187,9 +187,18 @@ router.patch('/:id', wrap(async (req: AuthRequest, res: Response) => {
 }))
 
 // POST /accounts/:id/sync
+const SYNC_COOLDOWN_SECONDS = 30
+
 router.post('/:id/sync', wrap(async (req: AuthRequest, res: Response) => {
   const account = await prisma.mailAccount.findFirst({ where: { id: req.params.id, userId: req.userId! } })
   if (!account) { res.status(404).json({ error: 'Not found' }); return }
+
+  const acquired = await redis.set(`mailhub:sync:cooldown:${account.id}`, '1', 'EX', SYNC_COOLDOWN_SECONDS, 'NX')
+  if (!acquired) {
+    res.status(429).json({ error: 'Aguarde alguns segundos antes de atualizar de novo' })
+    return
+  }
+
   await redis.publish('mailhub:sync:start', JSON.stringify({ accountId: account.id }))
   res.json({ ok: true })
 }))

@@ -72,6 +72,10 @@ export const useMailStore = defineStore('mail', () => {
     foldersByAccount.value = { ...foldersByAccount.value, [accountId]: data }
   }
 
+  async function refreshAccount(accountId: string) {
+    await api.post(`/accounts/${accountId}/sync`)
+  }
+
   // ── folder / messages ──────────────────────────────────────────────────────
   async function selectFolder(accountId: string, folderId: string) {
     selectedAccountId.value = accountId
@@ -370,7 +374,7 @@ export const useMailStore = defineStore('mail', () => {
     accounts, foldersByAccount, selectedAccountId, selectedFolderId,
     messages, nextCursor, selectedMessage, selectedIds, searchResults, searchQuery,
     loadingMessages, loadingMessage, connected, syncProgress,
-    fetchAccounts, fetchFolders, selectFolder, loadMessages,
+    fetchAccounts, fetchFolders, refreshAccount, selectFolder, loadMessages,
     selectMessage, refreshMessage, toggleFlag, toggleRead, deleteMessage,
     search, loadLabelMessages,
     toggleSelectMessage, selectAllMessages, clearSelection, bulkMarkRead, bulkDelete,

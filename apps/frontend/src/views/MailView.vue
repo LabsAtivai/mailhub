@@ -103,6 +103,9 @@
           <template v-else>
             <span class="folder-title">{{ listTitle }}</span>
             <span class="msg-count">{{ displayMessages.length }}</span>
+            <Button :icon="isSelectedAccountSyncing ? 'pi pi-spinner pi-spin' : 'pi pi-refresh'"
+              text rounded size="small" :disabled="isSelectedAccountSyncing"
+              v-tooltip="'Atualizar'" @click="refreshSelectedAccount" />
           </template>
         </div>
         <div v-if="mail.selectedIds.size > 0" class="header-row2 bulk-actions">
@@ -476,6 +479,24 @@ const listTitle = computed(() => {
 const visibleAttachments = computed(() =>
   (mail.selectedMessage?.attachments ?? []).filter(a => !a.isInline)
 )
+
+const isSelectedAccountSyncing = computed(() =>
+  mail.accounts.find(a => a.id === mail.selectedAccountId)?.syncState === 'SYNCING'
+)
+
+async function refreshSelectedAccount() {
+  if (!mail.selectedAccountId) return
+  try {
+    await mail.refreshAccount(mail.selectedAccountId)
+  } catch (e: unknown) {
+    const err = e as { response?: { status?: number; data?: { error?: string } } }
+    if (err?.response?.status === 429) {
+      toast.add({ severity: 'info', summary: err.response.data?.error ?? 'Aguarde um pouco antes de atualizar de novo', life: 2500 })
+    } else {
+      toast.add({ severity: 'error', summary: 'Erro ao atualizar', life: 2500 })
+    }
+  }
+}
 
 const senderInitial = computed(() => {
   const name = mail.selectedMessage?.fromName || mail.selectedMessage?.fromEmail || '?'
