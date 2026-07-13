@@ -273,7 +273,7 @@ async function runWithConcurrency(
   }
 }
 
-// ── periodic incremental sync every 20 minutes ──────────────────────────────
+// ── periodic incremental sync every 30 minutes ──────────────────────────────
 // Intervalo maior reduz a carga de fundo contra o host IMAP compartilhado; o
 // usuário tem um botão de atualizar manual (POST /accounts/:id/sync) para não
 // depender só disso quando quiser ver algo na hora.
@@ -288,7 +288,7 @@ setInterval(async () => {
     const errMsg = err instanceof Error ? (err as Error).message : String(err)
     logger.error({ err: errMsg }, 'periodic sync scheduler error')
   }
-}, 20 * 60 * 1000)
+}, 30 * 60 * 1000)
 
 // ── boot: reset stale SYNCING states + sync all accounts ────────────────────
 prisma.mailAccount.updateMany({
