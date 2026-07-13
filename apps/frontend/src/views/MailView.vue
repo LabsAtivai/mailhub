@@ -103,7 +103,8 @@
           <template v-else>
             <span class="folder-title">{{ listTitle }}</span>
             <span class="msg-count">{{ displayMessages.length }}</span>
-            <Button :icon="isSelectedAccountSyncing ? 'pi pi-spinner pi-spin' : 'pi pi-refresh'"
+            <Button v-if="!searchInput && !activeLabelId && mail.selectedAccountId"
+              :icon="isSelectedAccountSyncing ? 'pi pi-spinner pi-spin' : 'pi pi-refresh'"
               text rounded size="small" :disabled="isSelectedAccountSyncing"
               v-tooltip="'Atualizar'" @click="refreshSelectedAccount" />
           </template>
