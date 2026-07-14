@@ -251,7 +251,17 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
           logger.error({ accountId, messageId }, 'no Sent folder available (nem encontrada nem criável), e-mail enviado não gravado em nenhuma pasta Sent')
         }
       } catch (err: unknown) {
-        logger.error({ accountId, messageId, err: err instanceof Error ? err.message : String(err) }, 'failed to append sent message to IMAP Sent folder')
+        // ImapFlow joga o motivo de verdade (cota, tamanho, permissão etc.)
+        // em responseText/responseStatus, não em err.message (que só diz
+        // genericamente "Command failed") — sem isso não dá pra saber POR
+        // QUE o servidor recusou o APPEND.
+        const e = err as Record<string, unknown>
+        logger.error({
+          accountId, messageId,
+          err: err instanceof Error ? err.message : String(err),
+          responseStatus: e?.responseStatus,
+          responseText: e?.responseText,
+        }, 'failed to append sent message to IMAP Sent folder')
       }
     } else {
       logger.warn({ accountId, messageId }, 'no raw MIME cached for sent message, cannot append to Sent')
