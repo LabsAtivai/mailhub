@@ -329,7 +329,19 @@ export const useMailStore = defineStore('mail', () => {
         searchResults.value = searchResults.value.map(m => m.id === payload.messageId ? patch(m) : m)
       }
       if (selectedMessage.value?.id === payload.messageId) {
-        selectedMessage.value = { ...selectedMessage.value, ...payload }
+        // NUNCA espalhar "payload" inteiro aqui: o payload do socket usa
+        // "messageId" pra dizer QUAL mensagem (o id interno), enquanto
+        // selectedMessage.messageId é o Message-ID de e-mail (RFC822) — um
+        // spread cego sobrescrevia esse campo com o id interno, corrompendo
+        // o threading de resposta (In-Reply-To/References) e o "Respondido"
+        // automático depois de qualquer marca de lido/favorito via socket.
+        const m = selectedMessage.value
+        selectedMessage.value = {
+          ...m,
+          isRead: typeof payload.isRead === 'boolean' ? payload.isRead : m.isRead,
+          isFlagged: typeof payload.isFlagged === 'boolean' ? payload.isFlagged : m.isFlagged,
+          isAnswered: typeof payload.isAnswered === 'boolean' ? payload.isAnswered : m.isAnswered,
+        }
       }
     })
 
