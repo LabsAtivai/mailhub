@@ -184,6 +184,28 @@ async function handleDelete(payload: DeletePayload) {
   if (trashFolderId) await syncAccount(accountId)
 }
 
+// Tenta achar a pasta Sent de verdade no servidor (não só o que já foi
+// sincronizado pro Postgres — pode estar desatualizado ou incompleto), e cria
+// uma se realmente não existir nenhuma. Contas que nunca mandaram e-mail por
+// nenhum cliente antes do MailHub às vezes simplesmente não têm essa pasta no
+// servidor ainda; sem isso, o APPEND falhava pra sempre, silenciosamente.
+async function resolveSentFolderPath(accountId: string, client: Awaited<ReturnType<typeof getInteractiveClient>>): Promise<string | null> {
+  try {
+    const folders = await client.list()
+    const bySpecialUse = folders.find(f => (f.specialUse as string | undefined) === '\\Sent')
+    if (bySpecialUse) return bySpecialUse.path
+    const byName = folders.find(f => /sent/i.test(f.name) || /sent/i.test(f.path))
+    if (byName) return byName.path
+
+    const created = await client.mailboxCreate(['Sent'])
+    logger.info({ accountId, path: created.path, created: created.created }, 'pasta Sent criada no servidor IMAP')
+    return created.path
+  } catch (err: unknown) {
+    logger.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'failed to find/create Sent folder on IMAP')
+    return null
+  }
+}
+
 // ── sent append: copy sent message to IMAP Sent folder ──────────────────────
 async function handleSentAppend(payload: { accountId: string; messageId?: string }) {
   const { accountId, messageId } = payload
@@ -192,22 +214,28 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
   // e-mail novo recebido (ver syncAccount.ts).
   if (messageId) await markRecentlySent(accountId, messageId)
 
-  const sentFolder = await prisma.folder.findFirst({
-    where: { accountId, OR: [{ specialUse: '\\Sent' }, { path: 'Sent' }, { path: 'INBOX.Sent' }] },
-  })
-  if (!sentFolder) {
-    logger.warn({ accountId }, 'no Sent folder found, skipping append')
-    return
-  }
-
   if (messageId) {
     const rawKey = `mailhub:sentraw:${accountId}:${messageId}`
     const rawBase64 = await redis.get(rawKey)
     if (rawBase64) {
       try {
         const client = await getInteractiveClient(accountId)
-        await client.append(sentFolder.path, Buffer.from(rawBase64, 'base64'), ['\\Seen'])
-        await redis.del(rawKey)
+        // Postgres primeiro (rápido, cobre o caso comum); só faz LIST/CREATE
+        // ao vivo no servidor se a sincronização local não conhece a pasta.
+        const cached = await prisma.folder.findFirst({
+          where: { accountId, OR: [
+            { specialUse: '\\Sent' },
+            { path: { equals: 'Sent', mode: 'insensitive' } },
+            { path: { equals: 'INBOX.Sent', mode: 'insensitive' } },
+          ] },
+        })
+        const sentPath = cached?.path ?? await resolveSentFolderPath(accountId, client)
+        if (sentPath) {
+          await client.append(sentPath, Buffer.from(rawBase64, 'base64'), ['\\Seen'])
+          await redis.del(rawKey)
+        } else {
+          logger.error({ accountId, messageId }, 'no Sent folder available (nem encontrada nem criável), e-mail enviado não gravado em nenhuma pasta Sent')
+        }
       } catch (err: unknown) {
         logger.error({ accountId, messageId, err: err instanceof Error ? err.message : String(err) }, 'failed to append sent message to IMAP Sent folder')
       }

@@ -141,7 +141,11 @@ export const messageUseCases = {
   }) {
     const account = await repo.findAccountForUser(dto.accountId, userId)
     if (!account) throw new NotFoundError('Conta não encontrada')
-    await touchAccountActivity(account.id)
+    // Sem republicar sync:start aqui: o fluxo de envio já dispara seu próprio
+    // resync via mailhub:sent:append ao final (ver worker/index.ts,
+    // handleSentAppend). Publicar os dois juntos geraria um syncAccount()
+    // concorrente pra mesma conta e um dos dois vira no-op.
+    await touchAccountActivity(account.id, { triggerResync: false })
 
     const attachments = (dto.attachments ?? []).map(a => ({
       filename: a.filename,
