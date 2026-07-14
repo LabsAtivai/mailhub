@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken'
+import { randomUUID } from 'crypto'
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
   throw new Error('JWT_SECRET must be set and at least 16 characters')
@@ -20,7 +21,10 @@ export function signAccess(payload: JwtPayload): string {
 }
 
 export function signRefresh(payload: JwtPayload): string {
-  return jwt.sign(payload, REFRESH_SECRET, { expiresIn: '7d' })
+  // jti garante token único mesmo se emitido no mesmo segundo (iat) pro mesmo
+  // usuário — sem isso, dois logins rápidos geram o MESMO JWT (assinatura
+  // determinística) e o segundo viola o unique constraint de RefreshToken.token.
+  return jwt.sign({ ...payload, jti: randomUUID() }, REFRESH_SECRET, { expiresIn: '7d' })
 }
 
 function validatePayload(decoded: string | jwt.JwtPayload): JwtPayload {
