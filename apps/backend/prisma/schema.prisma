@@ -43,6 +43,7 @@ model MailAccount {
   syncEnabled       Boolean   @default(true)
   syncState         String    @default("PENDING")
   lastSyncAt        DateTime?
+  lastActiveAt      DateTime?
   lastError         String?
   forwardEnabled    Boolean   @default(false)
   forwardTo         String?

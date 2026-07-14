@@ -161,6 +161,11 @@ router.post('/accounts', wrap(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: d.userId } })
   if (!user) { res.status(404).json({ error: 'Usuário não encontrado' }); return }
 
+  // Sem lastActiveAt aqui de propósito: essa rota é usada pra provisionamento
+  // em massa (ex: migração de contas), e marcar tudo como "ativo" na criação
+  // daria IDLE permanente pra centenas de contas de uma vez — exatamente o
+  // problema que a Fase de ativação sob demanda existe pra evitar. A conta
+  // fica em polling periódico até o dono de fato abrir/usar ela.
   const account = await prisma.mailAccount.create({
     data: {
       userId: d.userId,

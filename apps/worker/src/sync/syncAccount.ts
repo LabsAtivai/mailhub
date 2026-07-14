@@ -11,6 +11,15 @@ const log = scope('sync')
 const SYNC_DAYS = 90
 const BATCH_SIZE = 200
 
+// Mitigação pro estouro de conexões IMAP simultâneas contra o host
+// compartilhado da HostGator (~1000 IDLE permanentes, uma por conta,
+// derrubando o cPanel com erro 500 de LVE/CloudLinux): só mantemos IDLE pra
+// contas com atividade recente (usuário abriu uma pasta, mandou e-mail ou
+// clicou em atualizar — ver backend/lib/accountActivity.ts, que precisa usar
+// o MESMO valor aqui). Contas inativas caem pro sync periódico normal
+// (a cada 30min, ver worker/index.ts) em vez de conexão permanente.
+const ACCOUNT_ACTIVE_THRESHOLD_MS = 60 * 60 * 1000 // 1h
+
 // Alguns provedores (ex: HostGator/cPanel) devolvem uma cópia da mensagem
 // recém-enviada via SMTP diretamente na INBOX (não só na pasta Sent), o que
 // fazia essa cópia ser tratada como e-mail novo recebido (badge de não lido +
@@ -111,8 +120,15 @@ export async function syncAccount(accountId: string): Promise<void> {
       data: { syncState: 'IDLE', lastSyncAt: new Date(), lastError: null }
     })
     await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'IDLE', progress: 100 }))
-    ensureIdle(accountId).catch(err =>
-      log.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'idle start failed'))
+
+    const isActive = !!account.lastActiveAt
+      && (Date.now() - account.lastActiveAt.getTime()) <= ACCOUNT_ACTIVE_THRESHOLD_MS
+    if (isActive) {
+      ensureIdle(accountId).catch(err =>
+        log.error({ accountId, err: err instanceof Error ? err.message : String(err) }, 'idle start failed'))
+    } else {
+      await stopIdle(accountId)
+    }
 
   } catch (err: unknown) {
     const e = err as Record<string, unknown>
@@ -351,6 +367,14 @@ async function refreshCounts(accountId: string, folderId: string): Promise<void>
 // ── IMAP IDLE ────────────────────────────────────────────────────────────────
 const idleStarted = new Set<string>()
 const idleRetries = new Map<string, number>()
+
+export async function stopIdle(accountId: string): Promise<void> {
+  if (!idleStarted.has(accountId) && !pool.get(accountId, 'idle')) return
+  idleStarted.delete(accountId)
+  idleRetries.delete(accountId)
+  await pool.disconnectKind(accountId, 'idle')
+  log.info({ accountId }, 'IDLE stopped (conta inativa)')
+}
 
 export async function ensureIdle(accountId: string): Promise<void> {
   if (idleStarted.has(accountId) && pool.get(accountId, 'idle')) return

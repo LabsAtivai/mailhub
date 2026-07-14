@@ -131,6 +131,7 @@ router.post('/', wrap(async (req: AuthRequest, res: Response) => {
       username: d.username,
       encryptedPassword: encrypt(d.password),
       tlsMode: d.tlsMode,
+      lastActiveAt: new Date(), // conta recém-criada nasce "ativa" (ganha IDLE já na primeira sync)
     }
   })
 
@@ -199,6 +200,10 @@ router.post('/:id/sync', wrap(async (req: AuthRequest, res: Response) => {
     return
   }
 
+  // Clique manual em "Atualizar" é sinal forte de uso ativo — conta com IDLE
+  // pausado por inatividade volta a ficar elegível assim que o worker processar
+  // este sync:start (ver lib/accountActivity.ts e worker/sync/syncAccount.ts).
+  await prisma.mailAccount.update({ where: { id: account.id }, data: { lastActiveAt: new Date() } })
   await redis.publish('mailhub:sync:start', JSON.stringify({ accountId: account.id }))
   res.json({ ok: true })
 }))

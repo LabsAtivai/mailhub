@@ -4,6 +4,7 @@ import { messageRepository as repo } from './repository'
 import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
 import { decrypt } from '../../lib/crypto'
+import { touchAccountActivity } from '../../lib/accountActivity'
 
 const log = scope('messages')
 
@@ -40,7 +41,8 @@ interface SearchFilters {
 
 export const messageUseCases = {
   async listFolder(folderId: string, userId: string, limit: number, cursor?: string) {
-    await requireOwnedFolder(folderId, userId)
+    const folder = await requireOwnedFolder(folderId, userId)
+    await touchAccountActivity(folder.account.id)
     const rows = await repo.listByFolder(folderId, limit, cursor)
     const hasMore = rows.length > limit
     const items = hasMore ? rows.slice(0, limit) : rows
@@ -139,6 +141,7 @@ export const messageUseCases = {
   }) {
     const account = await repo.findAccountForUser(dto.accountId, userId)
     if (!account) throw new NotFoundError('Conta não encontrada')
+    await touchAccountActivity(account.id)
 
     const attachments = (dto.attachments ?? []).map(a => ({
       filename: a.filename,

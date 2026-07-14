@@ -48,6 +48,15 @@ export class ImapPool {
     return c?.usable ? c : undefined
   }
 
+  async disconnectKind(accountId: string, kind: ClientKind): Promise<void> {
+    const k = this.key(accountId, kind)
+    const client = this.clients.get(k)
+    if (!client) return
+    client.removeAllListeners()
+    await client.logout().catch(() => {})
+    this.clients.delete(k)
+  }
+
   async disconnect(accountId: string): Promise<void> {
     for (const kind of ['ops', 'idle', 'interactive'] as ClientKind[]) {
       const k = this.key(accountId, kind)
