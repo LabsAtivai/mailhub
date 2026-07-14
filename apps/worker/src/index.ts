@@ -228,6 +228,11 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
   // e-mail novo recebido (ver syncAccount.ts).
   if (messageId) await markRecentlySent(accountId, messageId)
 
+  // guardado pra aplicar DEPOIS do syncAccount() no final — senão o próprio
+  // resync (que limpa lastError ao terminar com sucesso) apaga esse aviso na
+  // mesma hora em que ele é gravado.
+  let appendError: string | null = null
+
   if (messageId) {
     const rawKey = `mailhub:sentraw:${accountId}:${messageId}`
     const rawBase64 = await redis.get(rawKey)
@@ -249,19 +254,26 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
           await redis.del(rawKey)
         } else {
           logger.error({ accountId, messageId }, 'no Sent folder available (nem encontrada nem criável), e-mail enviado não gravado em nenhuma pasta Sent')
+          appendError = 'Não foi possível encontrar nem criar a pasta Enviados no servidor'
         }
       } catch (err: unknown) {
-        // ImapFlow joga o motivo de verdade (cota, tamanho, permissão etc.)
-        // em responseText/responseStatus, não em err.message (que só diz
-        // genericamente "Command failed") — sem isso não dá pra saber POR
-        // QUE o servidor recusou o APPEND.
-        const e = err as Record<string, unknown>
-        logger.error({
-          accountId, messageId,
-          err: err instanceof Error ? err.message : String(err),
-          responseStatus: e?.responseStatus,
-          responseText: e?.responseText,
-        }, 'failed to append sent message to IMAP Sent folder')
+        // err.message do ImapFlow só diz "Command failed" genericamente. O
+        // motivo de verdade fica em propriedades extras do objeto de erro
+        // (responseText, responseStatus, code...), que variam conforme o
+        // tipo de falha — em vez de apostar em nomes específicos, despeja
+        // TODAS as propriedades próprias do erro pra não ficar cego de novo.
+        const dump: Record<string, unknown> = {}
+        if (err && typeof err === 'object') {
+          for (const key of Object.getOwnPropertyNames(err)) {
+            try { dump[key] = (err as Record<string, unknown>)[key] } catch { /* ignore */ }
+          }
+        }
+        logger.error(
+          { accountId, messageId, err: err instanceof Error ? err.message : String(err), errDump: dump },
+          'failed to append sent message to IMAP Sent folder'
+        )
+        const responseText = typeof dump.responseText === 'string' ? dump.responseText : null
+        appendError = responseText ? `Falha ao salvar em Enviados: ${responseText}` : 'Falha ao salvar o e-mail enviado na pasta Enviados'
       }
     } else {
       logger.warn({ accountId, messageId }, 'no raw MIME cached for sent message, cannot append to Sent')
@@ -269,6 +281,17 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
   }
 
   await syncAccount(accountId)
+
+  // Sem isso, uma causa de infra (cota de disco estourada, por exemplo) fica
+  // invisível pro time — só aparece cavando log do worker, como aconteceu
+  // aqui. Só aplica se o resync acima não tiver já marcado a conta com ERROR
+  // por outro motivo mais urgente (não queremos mascarar isso).
+  if (appendError) {
+    const account = await prisma.mailAccount.findUnique({ where: { id: accountId }, select: { syncState: true } })
+    if (account && account.syncState !== 'ERROR') {
+      await prisma.mailAccount.update({ where: { id: accountId }, data: { lastError: appendError } }).catch(() => {})
+    }
+  }
 }
 
 // ── fetch attachment: download attachment content from IMAP ──────────────────
