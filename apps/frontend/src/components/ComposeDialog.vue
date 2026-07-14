@@ -117,11 +117,17 @@ function parseAddrs(json: string | null | undefined): string[] {
   } catch { return [] }
 }
 
+function resetComposeState() {
+  Object.assign(form, { to: '', cc: '', subject: '', body: '' })
+  attachments.value = []
+}
+
 watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
-  if (!msg) { isReply.value = false; return }
+  if (!msg) { isReply.value = false; if (!props.forwardMsg) resetComposeState(); return }
   isReply.value = true
   isForward.value = false
   form.accountId = mail.selectedAccountId || ''
+  attachments.value = []
 
   const ownEmail = mail.accounts.find(a => a.id === form.accountId)?.emailAddress?.toLowerCase() ?? ''
   // Mensagem da própria pasta Enviados/Rascunhos: "de" é a própria conta, então
@@ -149,11 +155,13 @@ watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
 })
 
 watch(() => props.forwardMsg, (msg) => {
-  if (!msg) { isForward.value = false; return }
+  if (!msg) { isForward.value = false; if (!props.replyTo) resetComposeState(); return }
   isForward.value = true
   isReply.value = false
   form.accountId = mail.selectedAccountId || ''
+  attachments.value = []
   form.to = ''
+  form.cc = ''
   form.subject = msg.subject?.startsWith('Fwd:') ? msg.subject : `Fwd: ${msg.subject || ''}`
   form.body = `\n\n---------- Mensagem encaminhada ----------\nDe: ${msg.fromEmail || ''}\nData: ${new Date(msg.date).toLocaleString('pt-BR')}\nAssunto: ${msg.subject || ''}\n\n${msg.textBody || ''}`
 })
