@@ -11,6 +11,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/auth': 'http://localhost:3001',
+      // regex (não prefixo simples): "/admin" sozinho é a tela do SPA (Vue
+      // Router), só "/admin/..." é API — a barra final evita a rota da tela
+      // cair no proxy e devolver o 401 da API em vez do index.html.
+      '^/admin/': 'http://localhost:3001',
       '/accounts': 'http://localhost:3001',
       '/folders': 'http://localhost:3001',
       '/messages': 'http://localhost:3001',
