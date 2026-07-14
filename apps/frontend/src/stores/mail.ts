@@ -276,7 +276,7 @@ export const useMailStore = defineStore('mail', () => {
     for (const id of accountIds) socket.emit('join:account', id)
 
     // ── mail events ──────────────────────────────────────────────────────────
-    socket.on('mail:new', (payload: { messageId: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string; inReplyTo?: string | null }) => {
+    socket.on('mail:new', (payload: { messageId: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string; inReplyTo?: string | null; selfSent?: boolean }) => {
       if (payload.folderId === selectedFolderId.value) {
         const exists = messages.value.some(x => x.id === payload.messageId)
         if (!exists) {
@@ -284,11 +284,15 @@ export const useMailStore = defineStore('mail', () => {
             id: payload.messageId, uid: '', subject: payload.subject ?? null,
             preview: null, fromName: payload.fromName ?? null, fromEmail: payload.fromEmail ?? null,
             toJson: '[]', date: new Date().toISOString(),
-            isRead: false, isFlagged: false, isAnswered: false, hasAttachments: false, size: null,
+            isRead: !!payload.selfSent, isFlagged: false, isAnswered: false, hasAttachments: false, size: null,
             inReplyTo: payload.inReplyTo ?? null, labels: [],
           }, ...messages.value]
         }
       }
+      // Cópia do próprio envio aparecendo na Sent: já nasce lida, não conta
+      // como não-lida nem dispara notificação de desktop (não é e-mail novo
+      // recebido, é o destino correto do que a gente mesmo mandou).
+      if (payload.selfSent) return
       updateFolderUnread(payload.folderId, 1)
 
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {

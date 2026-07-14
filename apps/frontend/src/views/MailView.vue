@@ -150,7 +150,9 @@
             @change="mail.toggleSelectMessage(msg.id)" />
           <div class="msg-content">
             <div class="msg-row1">
-              <span class="msg-sender">{{ msg.fromName || msg.fromEmail || '(sem remetente)' }}</span>
+              <span class="msg-sender">{{ isViewingSentOrDrafts
+                ? `Para: ${formatAddresses(msg.toJson) || '(sem destinatário)'}`
+                : (msg.fromName || msg.fromEmail || '(sem remetente)') }}</span>
               <span class="msg-date">{{ formatDate(msg.date) }}</span>
             </div>
             <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
@@ -475,6 +477,16 @@ const listTitle = computed(() => {
     if (f) return f.name
   }
   return 'Caixa de entrada'
+})
+
+// Em Enviados/Rascunhos o remetente é sempre a própria conta — mostrar quem
+// mandou não ajuda em nada. Mostra o destinatário, como no Gmail.
+const isViewingSentOrDrafts = computed(() => {
+  for (const folders of Object.values(mail.foldersByAccount)) {
+    const f = folders.find(x => x.id === mail.selectedFolderId)
+    if (f) return f.specialUse === '\\Sent' || f.specialUse === '\\Drafts'
+  }
+  return false
 })
 
 const visibleAttachments = computed(() =>

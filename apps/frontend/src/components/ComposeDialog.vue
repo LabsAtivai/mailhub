@@ -123,8 +123,12 @@ watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
   isForward.value = false
   form.accountId = mail.selectedAccountId || ''
 
+  const ownEmail = mail.accounts.find(a => a.id === form.accountId)?.emailAddress?.toLowerCase() ?? ''
+  // Mensagem da própria pasta Enviados/Rascunhos: "de" é a própria conta, então
+  // responder precisa mirar em quem recebeu (toJson), não em si mesmo.
+  const isOwnMessage = !!msg.fromEmail && msg.fromEmail.toLowerCase() === ownEmail
+
   if (props.replyAll) {
-    const ownEmail = mail.accounts.find(a => a.id === form.accountId)?.emailAddress?.toLowerCase() ?? ''
     const toAddrs = parseAddrs(msg.toJson)
     const ccAddrs = parseAddrs(msg.ccJson)
     const replyToAddrs = msg.fromEmail ? [msg.fromEmail] : []
@@ -132,6 +136,9 @@ watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
     const ccAll = [...new Set(ccAddrs.filter(e => e.toLowerCase() !== ownEmail))]
     form.to = toAll.join(', ')
     form.cc = ccAll.join(', ')
+  } else if (isOwnMessage) {
+    form.to = parseAddrs(msg.toJson).join(', ')
+    form.cc = ''
   } else {
     form.to = msg.fromEmail || ''
     form.cc = ''

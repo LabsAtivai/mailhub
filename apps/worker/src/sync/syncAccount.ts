@@ -97,7 +97,7 @@ export async function syncAccount(accountId: string): Promise<void> {
         create: { accountId, path: imapFolder.path, name: imapFolder.name, specialUse },
         update: { name: imapFolder.name, specialUse },
       })
-      await syncMessages(client, accountId, folder.id, imapFolder.path, since)
+      await syncMessages(client, accountId, folder.id, imapFolder.path, since, specialUse === '\\Sent')
       done++
       await redis.publish('account:syncState', JSON.stringify({
         accountId, state: 'SYNCING',
@@ -139,7 +139,7 @@ interface MailboxInfo {
 
 async function syncMessages(
   client: ImapFlow, accountId: string,
-  folderId: string, folderPath: string, since: Date
+  folderId: string, folderPath: string, since: Date, isSentFolder = false
 ): Promise<void> {
   let lock
   try { lock = await client.getMailboxLock(folderPath) }
@@ -164,10 +164,10 @@ async function syncMessages(
     const isFirstSync = !storedUidValidity || storedUidValidity !== serverUidValidity
 
     if (isFirstSync) {
-      await batchFetchAndUpsert(client, accountId, folderId, { since }, false)
+      await batchFetchAndUpsert(client, accountId, folderId, { since }, false, isSentFolder)
     } else if (serverUidNext > storedUidNext) {
       const range = `${storedUidNext}:*`
-      await batchFetchAndUpsert(client, accountId, folderId, range, true, { uid: true })
+      await batchFetchAndUpsert(client, accountId, folderId, range, true, isSentFolder, { uid: true })
     }
 
     if (!isFirstSync) {
@@ -209,6 +209,7 @@ async function batchFetchAndUpsert(
   folderId: string,
   range: unknown,
   notify: boolean,
+  isSentFolder = false,
   options?: object
 ): Promise<void> {
   const batch: Array<Record<string, unknown>> = []
@@ -220,11 +221,11 @@ async function batchFetchAndUpsert(
   )) {
     batch.push(msg as unknown as Record<string, unknown>)
     if (batch.length >= BATCH_SIZE) {
-      await upsertBatch(accountId, folderId, batch, notify)
+      await upsertBatch(accountId, folderId, batch, notify, isSentFolder)
       batch.length = 0
     }
   }
-  if (batch.length > 0) await upsertBatch(accountId, folderId, batch, notify)
+  if (batch.length > 0) await upsertBatch(accountId, folderId, batch, notify, isSentFolder)
 }
 
 interface Envelope {
@@ -238,7 +239,7 @@ interface Envelope {
 }
 
 async function upsertBatch(
-  accountId: string, folderId: string, msgs: Array<Record<string, unknown>>, notify: boolean
+  accountId: string, folderId: string, msgs: Array<Record<string, unknown>>, notify: boolean, isSentFolder = false
 ): Promise<void> {
   const uids = msgs.map(m => BigInt(m.uid as number))
 
@@ -290,7 +291,12 @@ async function upsertBatch(
         hasAttachments: hasAttach(msg.bodyStructure),
         size: (msg.size as number) || 0,
       })
-      if (isSelfSentCopy && env.messageId) suppressNotifyMessageIds.add(env.messageId)
+      // Fora da Sent, uma cópia auto-enviada é a anomalia que motivou a supressão
+      // (provedor devolvendo o envio na INBOX como se fosse resposta nova) — não
+      // notifica de jeito nenhum. Na própria Sent, é o destino correto da
+      // mensagem: notifica normalmente pra lista atualizar ao vivo, só marcada
+      // como selfSent abaixo pro frontend não disparar notificação de desktop.
+      if (isSelfSentCopy && env.messageId && !isSentFolder) suppressNotifyMessageIds.add(env.messageId)
     }
   }
 
@@ -314,10 +320,11 @@ async function upsertBatch(
     })
     for (const msg of created) {
       if (msg.messageId && suppressNotifyMessageIds.has(msg.messageId)) continue
+      const selfSent = !!msg.messageId && selfSentMessageIds.has(msg.messageId)
       await redis.publish('mail:new', JSON.stringify({
         accountId, folderId, messageId: msg.id,
         subject: msg.subject, fromEmail: msg.fromEmail, fromName: msg.fromName,
-        inReplyTo: msg.inReplyTo,
+        inReplyTo: msg.inReplyTo, selfSent,
       }))
     }
   }
@@ -394,7 +401,8 @@ async function handleNewMessages(client: ImapFlow, accountId: string, data: { co
   if (!folder) return
 
   const storedUidNext = folder.uidNext ?? BigInt(1)
-  await batchFetchAndUpsert(client, accountId, folder.id, `${storedUidNext}:*`, true, { uid: true })
+  // IDLE só observa a INBOX, nunca a pasta Sent.
+  await batchFetchAndUpsert(client, accountId, folder.id, `${storedUidNext}:*`, true, false, { uid: true })
 
   const mailbox = client.mailbox as MailboxInfo | undefined
   const newUidNext = BigInt(mailbox?.uidNext ?? storedUidNext)
