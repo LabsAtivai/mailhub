@@ -18,7 +18,7 @@ const BATCH_SIZE = 200
 // clicou em atualizar — ver backend/lib/accountActivity.ts, que precisa usar
 // o MESMO valor aqui). Contas inativas caem pro sync periódico normal
 // (a cada 30min, ver worker/index.ts) em vez de conexão permanente.
-const ACCOUNT_ACTIVE_THRESHOLD_MS = 60 * 60 * 1000 // 1h
+export const ACCOUNT_ACTIVE_THRESHOLD_MS = 60 * 60 * 1000 // 1h
 
 // Alguns provedores (ex: HostGator/cPanel) devolvem uma cópia da mensagem
 // recém-enviada via SMTP diretamente na INBOX (não só na pasta Sent), o que
@@ -302,7 +302,7 @@ async function upsertBatch(
         fromEmail: env.from?.[0]?.address || null,
         toJson: JSON.stringify(env.to || []),
         ccJson: env.cc ? JSON.stringify(env.cc) : null,
-        date: env.date || (msg.internalDate as Date) || new Date(),
+        date: safeDate(env.date) ?? safeDate(msg.internalDate) ?? new Date(),
         isRead, isFlagged, isAnswered,
         hasAttachments: hasAttach(msg.bodyStructure),
         size: (msg.size as number) || 0,
@@ -344,6 +344,16 @@ async function upsertBatch(
       }))
     }
   }
+}
+
+// Alguns remetentes (principalmente spam) mandam um header Date: malformado;
+// o ImapFlow às vezes repassa isso como string crua em vez de Date. Sem essa
+// checagem, um Prisma.message.createMany() com UMA data inválida rejeita o
+// LOTE INTEIRO (até 200 mensagens) — mensagens legítimas somem do sync por
+// causa de uma única mensagem de spam corrompida.
+function safeDate(d: unknown): Date | null {
+  if (d instanceof Date && !isNaN(d.getTime())) return d
+  return null
 }
 
 function hasAttach(struct: unknown): boolean {

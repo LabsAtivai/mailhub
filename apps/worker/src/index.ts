@@ -2,14 +2,28 @@ import 'dotenv/config'
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, fetchBody, refreshFlags, ensureIdle, getInteractiveClient, markRecentlySent } from './sync/syncAccount'
+import { syncAccount, fetchBody, refreshFlags, ensureIdle, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 
 logger.info('starting mailhub-worker')
 if (process.env.IMAP_PROXY_URL) logger.info({ proxy: process.env.IMAP_PROXY_URL }, 'IMAP proxy configured')
 
+// Rede de segurança de última instância: uma exceção não tratada aqui derruba
+// o processo inteiro (todas as ~1000 conexões IDLE de uma vez) e, na volta, o
+// boot sync resincroniza tudo de novo, sobrecarregando o host compartilhado
+// — foi exatamente o que causou o crash "Already logged out" em produção.
+// As causas conhecidas (ImapFlow, Redis) já têm listener próprio; isto aqui é
+// só o último resort pra qualquer coisa inesperada não derrubar o worker.
+process.on('uncaughtException', (err: Error) => {
+  logger.error({ err: err.message, stack: err.stack }, 'uncaught exception — worker seguiu rodando')
+})
+process.on('unhandledRejection', (reason: unknown) => {
+  logger.error({ err: reason instanceof Error ? reason.message : String(reason) }, 'unhandled rejection — worker seguiu rodando')
+})
+
 const sub = redis.duplicate()
+sub.on('error', (err: Error) => logger.error({ err: err.message }, 'redis sub connection error'))
 
 sub.subscribe(
   'mailhub:sync:start',
@@ -324,15 +338,29 @@ setInterval(async () => {
   }
 }, 30 * 60 * 1000)
 
-// ── boot: reset stale SYNCING states + sync all accounts ────────────────────
+// ── boot: reset stale SYNCING states + sync only recently-active accounts ──
+// Contas inativas já são cobertas pelo ciclo periódico (30min) — não faz
+// sentido ressincronizar todas as ~1000 de uma vez a cada reinício (deploy
+// normal OU crash inesperado). Essa rajada de conexões contra o host
+// compartilhado da HostGator foi o que agravou o incidente de "Already
+// logged out": o worker caiu, voltou, tentou resincronizar as 424 contas de
+// uma vez, e a sobrecarga gerou uma cascata de ETIMEDOUT/"cannot open
+// folder". Só as contas ativas nas últimas horas precisam de resync+IDLE na
+// hora; o resto pega o próximo ciclo periódico normalmente.
 prisma.mailAccount.updateMany({
   where: { syncState: 'SYNCING' },
   data: { syncState: 'IDLE' },
 }).then(({ count }) => {
   if (count > 0) logger.info({ count }, 'reset stale SYNCING accounts')
-  return prisma.mailAccount.findMany({ where: { syncEnabled: true }, select: { id: true } })
+  return prisma.mailAccount.findMany({
+    where: {
+      syncEnabled: true,
+      lastActiveAt: { gt: new Date(Date.now() - ACCOUNT_ACTIVE_THRESHOLD_MS) },
+    },
+    select: { id: true },
+  })
 }).then(accounts => {
-  logger.info({ count: accounts.length }, 'accounts to sync on boot')
+  logger.info({ count: accounts.length }, 'contas ativas a sincronizar no boot (inativas ficam pro próximo ciclo periódico)')
   runWithConcurrency(accounts.map(a => a.id), 10, 'boot')
     .then(() => logger.info('boot sync finished'))
     .catch(err => logger.error({ err: err instanceof Error ? err.message : String(err) }, 'boot sync crashed'))

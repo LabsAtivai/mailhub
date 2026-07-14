@@ -22,14 +22,13 @@ export class ImapPool {
     }
 
     const client = new ImapFlow({ ...opts, logger: false })
-    await Promise.race([
-      client.connect(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`IMAP connect timeout for ${accountId}:${kind}`)), 30_000)
-      ),
-    ])
-    this.clients.set(k, client)
 
+    // Registrar ANTES de conectar, não depois: se o connect() estourar o
+    // timeout abaixo, a tentativa continua rodando em background (promises
+    // não cancelam) e, sem um listener já preso nela, um erro emitido depois
+    // (ex: "Already logged out") sobe como exceção não tratada e derruba o
+    // processo do worker inteiro — foi exatamente isso que aconteceu em
+    // produção. Com os listeners já ativos, esse erro só é logado.
     client.on('error', (err: Error) => {
       log.error({ key: k, err: err.message }, 'connection error')
       client.removeAllListeners()
@@ -40,6 +39,23 @@ export class ImapPool {
       this.clients.delete(k)
     })
 
+    try {
+      await Promise.race([
+        client.connect(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`IMAP connect timeout for ${accountId}:${kind}`)), 30_000)
+        ),
+      ])
+    } catch (err) {
+      // O timeout venceu a corrida (ou connect() rejeitou de outra forma):
+      // fecha a tentativa explicitamente em vez de deixá-la órfã rodando
+      // sozinha. Os listeners acima já cobrem qualquer erro/close que ainda
+      // saia dela depois disso.
+      client.close()
+      throw err
+    }
+
+    this.clients.set(k, client)
     return client
   }
 
