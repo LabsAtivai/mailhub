@@ -152,6 +152,9 @@ async function handleMove(payload: MovePayload) {
 
   await prisma.message.delete({ where: { id: messageId } }).catch(() => {})
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId: sourceFolderId }))
+  // Sem isso, a mensagem some da pasta de origem mas só aparece na pasta de
+  // destino no próximo sync periódico (até 30min) — o usuário acha que sumiu.
+  await syncAccount(accountId)
 }
 
 interface DeletePayload { accountId: string; uid: string; messageId: string; folderId: string; trashFolderId?: string | null }
@@ -176,6 +179,9 @@ async function handleDelete(payload: DeletePayload) {
 
   await prisma.message.delete({ where: { id: messageId } }).catch(() => {})
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId }))
+  // Mesma razão do handleMove: sem isso a mensagem só aparece na Lixeira no
+  // próximo sync periódico quando foi um soft-delete (moveu pra trashFolderId).
+  if (trashFolderId) await syncAccount(accountId)
 }
 
 // ── sent append: copy sent message to IMAP Sent folder ──────────────────────
