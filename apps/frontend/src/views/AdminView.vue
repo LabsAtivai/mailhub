@@ -341,28 +341,45 @@ function formatNumber(n: number) {
   return String(n)
 }
 
+function extractAdminError(e: unknown, fallback: string): string {
+  const err = e as { response?: { data?: { error?: string } } }
+  return err?.response?.data?.error ? String(err.response.data.error) : fallback
+}
+
 async function loadData() {
-  const [s, u, a] = await Promise.all([
-    api.get('/admin/stats'),
-    api.get('/admin/users'),
-    api.get('/admin/accounts'),
-  ])
-  stats.value = s.data
-  users.value = u.data
-  accounts.value = a.data
+  try {
+    const [s, u, a] = await Promise.all([
+      api.get('/admin/stats'),
+      api.get('/admin/users'),
+      api.get('/admin/accounts'),
+    ])
+    stats.value = s.data
+    users.value = u.data
+    accounts.value = a.data
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao carregar dados do admin'), life: 4000 })
+  }
 }
 
 async function viewUser(u: AdminUser) {
   selectedUser.value = u
-  const { data } = await api.get(`/admin/users/${u.id}`)
-  userDetail.value = data
-  showUserDetail.value = true
+  try {
+    const { data } = await api.get(`/admin/users/${u.id}`)
+    userDetail.value = data
+    showUserDetail.value = true
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao carregar usuario'), life: 3000 })
+  }
 }
 
 async function setRole(userId: string, role: string) {
-  await api.patch(`/admin/users/${userId}`, { role })
-  toast.add({ severity: 'success', summary: `Role alterado para ${role}`, life: 2000 })
-  await loadData()
+  try {
+    await api.patch(`/admin/users/${userId}`, { role })
+    toast.add({ severity: 'success', summary: `Role alterado para ${role}`, life: 2000 })
+    await loadData()
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao alterar role'), life: 3000 })
+  }
 }
 
 function openEditUser(u: AdminUser) {
@@ -417,21 +434,34 @@ function confirmDeleteAccount(a: AdminAccount) {
 }
 
 async function executeDelete() {
-  if (pendingDelete) await pendingDelete()
-  showConfirmDelete.value = false
-  pendingDelete = null
+  try {
+    if (pendingDelete) await pendingDelete()
+    showConfirmDelete.value = false
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao excluir'), life: 3000 })
+  } finally {
+    pendingDelete = null
+  }
 }
 
 async function forceSync(accountId: string) {
-  await api.post(`/admin/accounts/${accountId}/sync`)
-  toast.add({ severity: 'info', summary: 'Sync iniciado', life: 2000 })
-  setTimeout(loadData, 3000)
+  try {
+    await api.post(`/admin/accounts/${accountId}/sync`)
+    toast.add({ severity: 'info', summary: 'Sync iniciado', life: 2000 })
+    setTimeout(loadData, 3000)
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao forcar sync'), life: 3000 })
+  }
 }
 
 async function toggleSync(accountId: string, enabled: boolean) {
-  await api.patch(`/admin/accounts/${accountId}`, { syncEnabled: enabled })
-  toast.add({ severity: 'success', summary: enabled ? 'Sync ativado' : 'Sync desativado', life: 2000 })
-  await loadData()
+  try {
+    await api.patch(`/admin/accounts/${accountId}`, { syncEnabled: enabled })
+    toast.add({ severity: 'success', summary: enabled ? 'Sync ativado' : 'Sync desativado', life: 2000 })
+    await loadData()
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao alterar sync'), life: 3000 })
+  }
 }
 
 async function createAccount() {

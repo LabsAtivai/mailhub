@@ -115,7 +115,7 @@
           <Button icon="pi pi-eye-slash" text rounded size="small"
             v-tooltip="'Marcar como não lido'" @click="mail.bulkMarkRead([...mail.selectedIds], false)" />
           <Button icon="pi pi-trash" text rounded size="small" severity="danger"
-            v-tooltip="'Excluir selecionados'" @click="mail.bulkDelete([...mail.selectedIds])" />
+            v-tooltip="'Excluir selecionados'" @click="onBulkDelete" />
           <select class="bulk-label-select" @change="onBulkLabelSelect($event)">
             <option value="">Aplicar etiqueta...</option>
             <option v-for="l in labelStore.labels" :key="l.id" :value="l.id">{{ l.name }}</option>
@@ -308,7 +308,7 @@ import { ref, computed, onMounted, nextTick, watch, watchEffect } from 'vue'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 import InputText from 'primevue/inputtext'
-import DOMPurify from 'dompurify'
+import { sanitizeEmailHtml } from '../lib/sanitizeEmail'
 import { useAuthStore } from '../stores/auth'
 import { useMailStore, type MessageDetail, type Attachment } from '../stores/mail'
 import { useLabelStore, type Label } from '../stores/labels'
@@ -387,25 +387,7 @@ const EMAIL_BASE_CSS = `
 const sanitizedBody = computed(() => {
   const html = mail.selectedMessage?.htmlBody
   if (!html) return ''
-  const cfg: Record<string, unknown> = {
-    FORBID_TAGS: ['script', 'iframe', 'form', 'input', 'object', 'embed'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
-  }
-  if (!showRemoteImages.value) {
-    DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
-      if (data.attrName === 'src' && node.tagName === 'IMG') {
-        const val = data.attrValue
-        if (val && (val.startsWith('http:') || val.startsWith('https:'))) {
-          data.attrValue = ''
-          node.setAttribute('data-blocked-src', val)
-          node.setAttribute('alt', node.getAttribute('alt') || '[imagem bloqueada]')
-        }
-      }
-    })
-  }
-  const clean = DOMPurify.sanitize(html, cfg)
-  DOMPurify.removeAllHooks()
-  return clean
+  return sanitizeEmailHtml(html, { blockRemoteImages: !showRemoteImages.value })
 })
 
 const styledBody = computed(() => {
@@ -618,8 +600,24 @@ async function selectLabel(labelId: string | undefined | null) {
   activeLabelId.value = labelId
   searchInput.value = ''
   mail.selectedMessage = null
-  const result = await labelStore.fetchLabelMessages(labelId)
-  await mail.loadLabelMessages(labelId, result.items, result.nextCursor)
+  try {
+    const result = await labelStore.fetchLabelMessages(labelId)
+    await mail.loadLabelMessages(labelId, result.items, result.nextCursor)
+  } catch {
+    toast.add({ severity: 'error', summary: 'Erro ao carregar mensagens da etiqueta', life: 3000 })
+  }
+}
+
+async function onBulkDelete() {
+  const { total, failed } = await mail.bulkDelete([...mail.selectedIds])
+  if (failed > 0) {
+    toast.add({
+      severity: failed === total ? 'error' : 'warn',
+      summary: failed === total ? 'Falha ao excluir mensagens' : 'Algumas mensagens não foram excluídas',
+      detail: `${failed} de ${total} exclusões falharam`,
+      life: 4000,
+    })
+  }
 }
 
 async function loadMoreLabelMessages() {
@@ -700,15 +698,19 @@ function logout() {
 
 async function downloadAttachment(att: Attachment) {
   try {
+    // 202 = ainda preparando (worker buscando no IMAP); qualquer outro 2xx
+    // já vem com o arquivo de verdade no corpo. Checar pelo status em vez de
+    // "o blob tem mais de 50 bytes" — isso classificava até a resposta JSON
+    // de "preparando" como se fosse o arquivo.
     const response = await api.get(`/attachments/${att.id}/download`, { responseType: 'blob' })
-    if (response.data instanceof Blob && response.data.size > 50) {
-      const url = URL.createObjectURL(response.data)
-      const a = document.createElement('a')
-      a.href = url; a.download = att.filename; a.click()
-      URL.revokeObjectURL(url)
-    } else {
+    if (response.status === 202) {
       toast.add({ severity: 'info', summary: 'Download solicitado', detail: 'O anexo está sendo preparado. Tente novamente em instantes.', life: 4000 })
+      return
     }
+    const url = URL.createObjectURL(response.data)
+    const a = document.createElement('a')
+    a.href = url; a.download = att.filename; a.click()
+    URL.revokeObjectURL(url)
   } catch {
     toast.add({ severity: 'error', summary: 'Erro ao baixar anexo', life: 3000 })
   }

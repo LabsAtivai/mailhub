@@ -10,6 +10,7 @@ import 'primeicons/primeicons.css'
 import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
+import { initSentry } from './lib/sentry'
 
 // BigInt JSON fix — backend serializes BigInt as string, but keep support for client-side serialization
 const origStringify = JSON.stringify
@@ -66,6 +67,7 @@ const AtivaPreset = definePreset(Aura, {
 const app = createApp(App)
 const pinia = createPinia()
 
+initSentry(app, router)
 app.use(pinia)
 app.use(router)
 app.use(PrimeVue, { theme: { preset: AtivaPreset, options: { darkModeSelector: '.dark' } } })

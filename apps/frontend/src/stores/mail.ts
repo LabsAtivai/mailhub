@@ -53,9 +53,19 @@ export const useMailStore = defineStore('mail', () => {
   async function fetchAccounts() {
     const { data } = await api.get('/accounts')
     accounts.value = data
-    for (const acc of data) {
-      await fetchFolders(acc.id)
-    }
+
+    // Se a busca de pastas de UMA conta falhar, as outras não deveriam pagar
+    // o pato — e o socket precisa conectar de qualquer jeito, senão a
+    // aplicação inteira perde atualização em tempo real até um F5, por causa
+    // de uma conta só (allSettled em vez de um for/await que aborta tudo no
+    // primeiro erro).
+    const results = await Promise.allSettled(data.map((acc: MailAccount) => fetchFolders(acc.id)))
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(`Falha ao carregar pastas da conta ${data[i]?.emailAddress ?? data[i]?.id}`, r.reason)
+      }
+    })
+
     setupSocket(data.map((a: MailAccount) => a.id))
 
     if (data.length > 0 && !selectedFolderId.value) {
@@ -116,8 +126,10 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   async function bulkDelete(ids: string[]) {
-    await Promise.all(ids.map(id => deleteMessage(id).catch(() => {})))
+    const results = await Promise.all(ids.map(id => deleteMessage(id).then(() => true).catch(() => false)))
     clearSelection()
+    const failed = results.filter(ok => !ok).length
+    return { total: ids.length, failed }
   }
 
   async function loadMessages(append = false) {

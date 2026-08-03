@@ -6,6 +6,9 @@ RUN npm ci
 COPY . .
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
+# Opcional: sem isso, o Sentry SDK nem entra no bundle (tree-shaken)
+ARG VITE_SENTRY_DSN
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
 RUN npm run build
 
 FROM nginx:alpine
