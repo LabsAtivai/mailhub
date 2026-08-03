@@ -5,6 +5,7 @@ import { encrypt } from '../../lib/crypto'
 import { redis } from '../../lib/redis'
 import { requireAuth, requireAdmin, AuthRequest } from '../../middleware/auth'
 import { scope } from '../../lib/logger'
+import { isPrivateHost } from '../../lib/ssrf'
 import { z } from 'zod'
 
 const log = scope('admin')
@@ -161,6 +162,10 @@ router.post('/accounts', wrap(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: d.userId } })
   if (!user) { res.status(404).json({ error: 'Usuário não encontrado' }); return }
 
+  if (await isPrivateHost(d.incomingHost) || await isPrivateHost(d.outgoingHost)) {
+    res.status(400).json({ error: 'Host inválido' }); return
+  }
+
   // Sem lastActiveAt aqui de propósito: essa rota é usada pra provisionamento
   // em massa (ex: migração de contas), e marcar tudo como "ativo" na criação
   // daria IDLE permanente pra centenas de contas de uma vez — exatamente o
@@ -178,6 +183,11 @@ router.post('/accounts', wrap(async (req, res) => {
       username: d.username,
       encryptedPassword: encrypt(d.password),
       tlsMode: d.tlsMode,
+    },
+    select: {
+      id: true, displayName: true, emailAddress: true,
+      incomingHost: true, incomingPort: true, outgoingHost: true, outgoingPort: true,
+      username: true, tlsMode: true, syncEnabled: true, syncState: true, createdAt: true,
     },
   })
 
@@ -205,6 +215,13 @@ router.patch('/accounts/:id', wrap(async (req, res) => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   const account = await prisma.mailAccount.findUnique({ where: { id: req.params.id } })
   if (!account) { res.status(404).json({ error: 'Conta não encontrada' }); return }
+
+  if (parsed.data.incomingHost && await isPrivateHost(parsed.data.incomingHost)) {
+    res.status(400).json({ error: 'Host inválido' }); return
+  }
+  if (parsed.data.outgoingHost && await isPrivateHost(parsed.data.outgoingHost)) {
+    res.status(400).json({ error: 'Host inválido' }); return
+  }
 
   const { password, ...rest } = parsed.data
   const data: Record<string, unknown> = { ...rest }

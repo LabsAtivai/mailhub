@@ -100,6 +100,7 @@ io.on('connection', (socket) => {
 
 // ── Redis → Socket.IO relay ─────────────────────────────────────────────────
 const redisSub = redis.duplicate()
+redisSub.on('error', (err: Error) => logger.error({ err: err.message }, 'redis sub connection error'))
 
 const EVENTS = [
   'mail:new', 'mail:updated', 'mail:deleted', 'mail:bodyReady',
