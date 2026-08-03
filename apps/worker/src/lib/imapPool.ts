@@ -7,6 +7,12 @@ const log = scope('imap-pool')
 
 export class ImapPool {
   private clients = new Map<string, ImapFlow>()
+  // Duas chamadas concorrentes pra mesma chave (ex: abrir e-mail dispara
+  // fetch:body e flag:refresh quase juntos) viam "sem cliente ainda" antes de
+  // qualquer uma delas terminar de conectar, e cada uma criava sua própria
+  // conexão — vazamento e violação do teto de 3 por conta (AP-004). Esse mapa
+  // faz a segunda chamada esperar a MESMA tentativa em vez de abrir outra.
+  private connecting = new Map<string, Promise<ImapFlow>>()
 
   private key(accountId: string, kind: ClientKind) {
     return `${accountId}:${kind}`
@@ -16,6 +22,21 @@ export class ImapPool {
     const k = this.key(accountId, kind)
     const existing = this.clients.get(k)
     if (existing?.usable) return existing
+
+    const inFlight = this.connecting.get(k)
+    if (inFlight) return inFlight
+
+    const attempt = this.doConnect(k, opts)
+    this.connecting.set(k, attempt)
+    try {
+      return await attempt
+    } finally {
+      this.connecting.delete(k)
+    }
+  }
+
+  private async doConnect(k: string, opts: ImapFlowOptions): Promise<ImapFlow> {
+    const existing = this.clients.get(k)
     if (existing) {
       existing.removeAllListeners()
       this.clients.delete(k)
@@ -43,7 +64,7 @@ export class ImapPool {
       await Promise.race([
         client.connect(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`IMAP connect timeout for ${accountId}:${kind}`)), 30_000)
+          setTimeout(() => reject(new Error(`IMAP connect timeout for ${k}`)), 30_000)
         ),
       ])
     } catch (err) {

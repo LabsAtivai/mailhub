@@ -4,5 +4,7 @@
     "outDir": "./dist", "rootDir": "./src",
     "strict": true, "esModuleInterop": true,
     "skipLibCheck": true, "resolveJsonModule": true
-  }
+  },
+  "include": ["src"],
+  "exclude": ["src/**/__tests__/**"]
 }

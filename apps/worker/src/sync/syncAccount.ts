@@ -5,6 +5,7 @@ import { decrypt } from '../lib/crypto'
 import { redis } from '../lib/redis'
 import { pool } from '../lib/imapPool'
 import { scope }  from '../lib/logger'
+import { isPrivateHost } from '../lib/ssrf'
 
 const log = scope('sync')
 
@@ -46,7 +47,14 @@ interface ImapAccount {
   emailAddress: string
 }
 
-function imapOptions(account: ImapAccount): ImapFlowOptions {
+async function imapOptions(account: ImapAccount): Promise<ImapFlowOptions> {
+  // O backend só valida host privado (SSRF) no cadastro da conta; entre
+  // aquele momento e cada reconexão real daqui (dias/semanas depois, de
+  // novo a cada drop de IDLE), o DNS do host pode ter mudado pra apontar
+  // pra rede interna (rebinding). Revalida logo antes de conectar de verdade.
+  if (await isPrivateHost(account.incomingHost)) {
+    throw new Error(`Host inválido (aponta pra rede interna): ${account.incomingHost}`)
+  }
   const opts: ImapFlowOptions = {
     host: account.incomingHost,
     port: account.incomingPort,
@@ -64,7 +72,7 @@ export async function getOpsClient(accountId: string): Promise<ImapFlow> {
   if (!account) throw new Error('Account not found')
   const existing = pool.get(accountId, 'ops')
   if (existing) return existing
-  return pool.connect(accountId, 'ops', imapOptions(account as ImapAccount))
+  return pool.connect(accountId, 'ops', await imapOptions(account as ImapAccount))
 }
 
 // Usada por ações do usuário (abrir e-mail, marcar como lido, mover, deletar, anexo)
@@ -74,7 +82,7 @@ export async function getInteractiveClient(accountId: string): Promise<ImapFlow>
   if (!account) throw new Error('Account not found')
   const existing = pool.get(accountId, 'interactive')
   if (existing) return existing
-  return pool.connect(accountId, 'interactive', imapOptions(account as ImapAccount))
+  return pool.connect(accountId, 'interactive', await imapOptions(account as ImapAccount))
 }
 
 // ── Full / incremental sync ──────────────────────────────────────────────────
@@ -87,9 +95,14 @@ export async function syncAccount(accountId: string): Promise<void> {
     data: { syncState: 'SYNCING' },
   })
   if (count === 0) return
-  await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'SYNCING', progress: 0 }))
 
   try {
+    // Publish também dentro do try: se isso falhar (blip do Redis), cai no
+    // catch abaixo e reverte o syncState — antes ficava fora, e uma falha
+    // aqui deixava a conta travada em SYNCING pra sempre (o guard acima só
+    // libera se syncState != 'SYNCING', e nada mais reverte isso a não ser
+    // reiniciar o worker).
+    await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'SYNCING', progress: 0 }))
     const client = await getOpsClient(accountId)
     const imapFolders = await client.list()
     const selectableFolders = imapFolders.filter(
@@ -393,11 +406,22 @@ export async function ensureIdle(accountId: string): Promise<void> {
   const account = await prisma.mailAccount.findUnique({ where: { id: accountId } })
   if (!account) return
 
-  const client = await pool.connect(accountId, 'idle', imapOptions(account as ImapAccount))
+  const client = await pool.connect(accountId, 'idle', await imapOptions(account as ImapAccount))
+
+  // Só marca como "IDLE ativo" DEPOIS do mailboxOpen ter funcionado de
+  // verdade. Marcar antes (como era) significava que, se mailboxOpen
+  // falhasse, a conta ficava travada achando que já tinha IDLE — a conexão
+  // seguia "usable" (só o comando falhou), então chamadas futuras de
+  // ensureIdle desistiam cedo (linha acima) e a conta parava de receber
+  // notificação de e-mail novo silenciosamente, sem nunca se recuperar.
+  try {
+    await client.mailboxOpen('INBOX')
+  } catch (err) {
+    await pool.disconnectKind(accountId, 'idle').catch(() => {})
+    throw err
+  }
   idleStarted.add(accountId)
   idleRetries.delete(accountId)
-
-  await client.mailboxOpen('INBOX')
   log.info({ accountId, email: account.emailAddress }, 'IDLE watching INBOX')
 
   client.on('exists', (data: { count?: number; prevCount?: number }) => {

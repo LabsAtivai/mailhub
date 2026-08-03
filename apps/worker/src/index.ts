@@ -1,13 +1,21 @@
 import 'dotenv/config'
+import { initSentry, Sentry } from './lib/sentry'
+initSentry()
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, fetchBody, refreshFlags, ensureIdle, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS } from './sync/syncAccount'
+import { syncAccount, fetchBody, refreshFlags, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
+import { AccountSerialQueue } from './lib/serialQueue'
 
 logger.info('starting mailhub-worker')
-if (process.env.IMAP_PROXY_URL) logger.info({ proxy: process.env.IMAP_PROXY_URL }, 'IMAP proxy configured')
+if (process.env.IMAP_PROXY_URL) {
+  // Proxies autenticados costumam vir como protocolo://usuario:senha@host:porta
+  // — logar a URL inteira vazaria essa senha em todo boot do worker.
+  const redactedProxy = process.env.IMAP_PROXY_URL.replace(/\/\/[^@/]+@/, '//***:***@')
+  logger.info({ proxy: redactedProxy }, 'IMAP proxy configured')
+}
 
 // Rede de segurança de última instância: uma exceção não tratada aqui derruba
 // o processo inteiro (todas as ~1000 conexões IDLE de uma vez) e, na volta, o
@@ -17,9 +25,11 @@ if (process.env.IMAP_PROXY_URL) logger.info({ proxy: process.env.IMAP_PROXY_URL 
 // só o último resort pra qualquer coisa inesperada não derrubar o worker.
 process.on('uncaughtException', (err: Error) => {
   logger.error({ err: err.message, stack: err.stack }, 'uncaught exception — worker seguiu rodando')
+  Sentry.captureException(err)
 })
 process.on('unhandledRejection', (reason: unknown) => {
   logger.error({ err: reason instanceof Error ? reason.message : String(reason) }, 'unhandled rejection — worker seguiu rodando')
+  Sentry.captureException(reason)
 })
 
 const sub = redis.duplicate()
@@ -62,13 +72,19 @@ const FetchAttachmentSchema = z.object({
   contentId: z.string().nullable().optional(),
 })
 
+const accountQueue = new AccountSerialQueue()
+
+function runSerialForAccount(accountId: string, task: () => Promise<void>): Promise<void> {
+  return accountQueue.run(accountId, task)
+}
+
 sub.on('message', async (channel: string, message: string) => {
   try {
     const raw = JSON.parse(message)
     switch (channel) {
       case 'mailhub:sync:start': {
         const p = SyncStartSchema.parse(raw)
-        await syncAccount(p.accountId)
+        await runSerialForAccount(p.accountId, () => syncAccount(p.accountId))
         break
       }
       case 'mailhub:fetch:body': {
@@ -78,32 +94,32 @@ sub.on('message', async (channel: string, message: string) => {
       }
       case 'mailhub:flag:refresh': {
         const p = FlagRefreshSchema.parse(raw)
-        await refreshFlags(p.messageId)
+        await runSerialForAccount(p.accountId, () => refreshFlags(p.messageId))
         break
       }
       case 'mailhub:flag:update': {
         const p = FlagUpdateSchema.parse(raw)
-        await handleFlagUpdate(p)
+        await runSerialForAccount(p.accountId, () => handleFlagUpdate(p))
         break
       }
       case 'mailhub:message:move': {
         const p = MoveSchema.parse(raw)
-        await handleMove(p)
+        await runSerialForAccount(p.accountId, () => handleMove(p))
         break
       }
       case 'mailhub:message:delete': {
         const p = DeleteSchema.parse(raw)
-        await handleDelete(p)
+        await runSerialForAccount(p.accountId, () => handleDelete(p))
         break
       }
       case 'mailhub:sent:append': {
         const p = SentAppendSchema.parse(raw)
-        await handleSentAppend(p)
+        await runSerialForAccount(p.accountId, () => handleSentAppend(p))
         break
       }
       case 'mailhub:fetch:attachment': {
         const p = FetchAttachmentSchema.parse(raw)
-        await handleFetchAttachment(p)
+        await runSerialForAccount(p.accountId, () => handleFetchAttachment(p))
         break
       }
     }
@@ -320,7 +336,13 @@ async function handleFetchAttachment(payload: AttachmentPayload) {
       logger.warn({ attachmentId, filename: payload.filename }, 'attachment not found in message')
       return
     }
-    logger.info({ attachmentId, size: att.size }, 'attachment fetched')
+    // Sem isso, o comando buscava e parseava o anexo e simplesmente
+    // descartava o conteúdo — o endpoint de download nunca tinha o que
+    // servir, então o recurso nunca funcionou de fato. TTL curto: é só uma
+    // ponte até o usuário clicar "baixar" de novo (ver messages/useCases.ts,
+    // requestAttachment).
+    await redis.set(`mailhub:attachment:${attachmentId}`, att.content.toString('base64'), 'EX', 600)
+    logger.info({ attachmentId, size: att.size }, 'attachment fetched and cached for download')
   } finally {
     lock.release()
   }
