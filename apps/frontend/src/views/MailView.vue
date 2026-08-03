@@ -19,6 +19,17 @@
         </span>
       </div>
 
+      <!-- caixa geral: INBOX de todas as contas numa lista só -->
+      <ul class="folder-list unified-list">
+        <li :class="{ active: mail.unifiedActive }" @click="selectUnifiedInbox">
+          <i class="pi pi-inbox" style="font-size:.8rem;width:14px"></i>
+          <span class="folder-name">Caixa Geral</span>
+          <span v-if="unifiedUnreadCount > 0" class="unread-badge">{{ unifiedUnreadCount }}</span>
+        </li>
+      </ul>
+
+      <Divider style="margin:.5rem 0" />
+
       <!-- accounts + folders -->
       <div v-for="acc in mail.accounts" :key="acc.id" class="account-section">
         <div class="account-header" @click="toggleAccount(acc.id)">
@@ -39,7 +50,7 @@
         <ul v-show="expandedAccounts.has(acc.id)" class="folder-list">
           <li v-for="folder in mail.foldersByAccount[acc.id] ?? []" :key="folder.id"
             :class="{ active: folder.id === mail.selectedFolderId }"
-            @click="mail.selectFolder(acc.id, folder.id); searchInput = ''">
+            @click="mail.selectFolder(acc.id, folder.id); searchInput = ''; activeLabelId = null">
             <i :class="folderIcon(folder.specialUse)" style="font-size:.8rem;width:14px"></i>
             <span class="folder-name">{{ folder.name }}</span>
             <span v-if="folder.unreadCount > 0" class="unread-badge">{{ folder.unreadCount }}</span>
@@ -156,7 +167,10 @@
               <span class="msg-date">{{ formatDate(msg.date) }}</span>
             </div>
             <div class="msg-subject">{{ msg.subject || '(sem assunto)' }}</div>
-            <div v-if="msg.inReplyTo || msg.isAnswered || msg.labels?.length" class="msg-badges">
+            <div v-if="(mail.unifiedActive && accountLabelFor(msg)) || msg.inReplyTo || msg.isAnswered || msg.labels?.length" class="msg-badges">
+              <span v-if="mail.unifiedActive && accountLabelFor(msg)" class="account-chip">
+                <i class="pi pi-at"></i> {{ accountLabelFor(msg) }}
+              </span>
               <span v-if="msg.inReplyTo" class="reply-chip">
                 <i class="pi pi-reply"></i> Resposta
               </span>
@@ -182,7 +196,7 @@
           </div>
         </div>
 
-        <div v-if="mail.nextCursor && !searchInput && !activeLabelId" class="load-more">
+        <div v-if="mail.nextCursor && !searchInput && !activeLabelId && !mail.unifiedActive" class="load-more">
           <Button label="Carregar mais" text size="small"
             :loading="mail.loadingMessages" @click="mail.loadMessages(true)" />
         </div>
@@ -190,6 +204,11 @@
         <div v-if="mail.nextCursor && activeLabelId" class="load-more">
           <Button label="Carregar mais" text size="small"
             :loading="loadingMoreLabels" @click="loadMoreLabelMessages" />
+        </div>
+
+        <div v-if="mail.nextCursor && mail.unifiedActive" class="load-more">
+          <Button label="Carregar mais" text size="small"
+            :loading="mail.loadingMessages" @click="mail.loadMoreUnified" />
         </div>
       </div>
     </section>
@@ -310,7 +329,7 @@ import Divider from 'primevue/divider'
 import InputText from 'primevue/inputtext'
 import { sanitizeEmailHtml } from '../lib/sanitizeEmail'
 import { useAuthStore } from '../stores/auth'
-import { useMailStore, type MessageDetail, type Attachment } from '../stores/mail'
+import { useMailStore, type MessageDetail, type MessageSummary, type Attachment } from '../stores/mail'
 import { useLabelStore, type Label } from '../stores/labels'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import EditAccountDialog from '../components/EditAccountDialog.vue'
@@ -451,6 +470,7 @@ async function onBulkLabelSelect(e: Event) {
 
 const listTitle = computed(() => {
   if (searchInput.value) return `"${searchInput.value}"`
+  if (mail.unifiedActive) return 'Caixa Geral'
   if (activeLabelId.value) {
     return labelStore.labels.find(l => l.id === activeLabelId.value)?.name ?? 'Etiqueta'
   }
@@ -460,6 +480,25 @@ const listTitle = computed(() => {
   }
   return 'Caixa de entrada'
 })
+
+// Soma o não-lido da INBOX de cada conta — mesmo critério de fallback
+// (specialUse/path/nome) usado em todo o resto do app pra achar a INBOX.
+const unifiedUnreadCount = computed(() => {
+  let total = 0
+  for (const folders of Object.values(mail.foldersByAccount)) {
+    const inbox = folders.find(f => f.specialUse === '\\Inbox' || f.path === 'INBOX' || f.name.toLowerCase() === 'inbox')
+    if (inbox) total += inbox.unreadCount
+  }
+  return total
+})
+
+// Mostra de qual conta a mensagem chegou, só faz sentido na Caixa Geral
+// (fora dela já dá pra saber olhando qual conta/pasta está selecionada).
+function accountLabelFor(msg: MessageSummary): string {
+  if (!mail.unifiedActive || !msg.accountId) return ''
+  const acc = mail.accounts.find(a => a.id === msg.accountId)
+  return acc ? (acc.displayName || acc.emailAddress) : ''
+}
 
 // Em Enviados/Rascunhos o remetente é sempre a própria conta — mostrar quem
 // mandou não ajuda em nada. Mostra o destinatário, como no Gmail.
@@ -581,6 +620,8 @@ function onListScroll(e: Event) {
   if (!mail.nextCursor || mail.loadingMessages || searchInput.value) return
   if (activeLabelId.value) {
     if (!loadingMoreLabels.value) loadMoreLabelMessages()
+  } else if (mail.unifiedActive) {
+    mail.loadMoreUnified()
   } else {
     mail.loadMessages(true)
   }
@@ -594,6 +635,12 @@ function onSearchInput() {
   searchTimer = setTimeout(doSearch, 400)
 }
 function doSearch() { if (searchInput.value) mail.search(searchInput.value) }
+
+async function selectUnifiedInbox() {
+  activeLabelId.value = null
+  searchInput.value = ''
+  await mail.loadUnifiedInbox()
+}
 
 async function selectLabel(labelId: string | undefined | null) {
   if (!labelId || labelId === 'undefined') return
@@ -876,6 +923,13 @@ async function downloadAttachment(att: Attachment) {
 .answered-chip-viewer {
   font-size: .72rem; padding: .08rem .5rem; vertical-align: middle; margin-right: .4rem;
 }
+.account-chip {
+  display: inline-flex; align-items: center; gap: .2rem;
+  font-size: .62rem; padding: .05rem .38rem; border-radius: 10px;
+  border: 1px solid #F47A20; background: #FFF1E4; color: #C2570C;
+  white-space: nowrap; font-weight: 600; line-height: 1.5;
+}
+.account-chip i { font-size: .58rem; }
 .read-btn { font-size: .78rem; color: var(--p-text-muted-color); cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .1s; }
 .msg-item:hover .read-btn { opacity: 1; }
 .read-btn.read-unread { color: #F47A20; opacity: 1; }

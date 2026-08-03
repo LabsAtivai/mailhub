@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma'
 
 export interface MessageListItem {
   id: string
+  accountId: string
   uid: bigint
   subject: string | null
   preview: string | null
@@ -19,7 +20,7 @@ export interface MessageListItem {
 }
 
 const LIST_SELECT = {
-  id: true, uid: true, subject: true, preview: true,
+  id: true, accountId: true, uid: true, subject: true, preview: true,
   fromName: true, fromEmail: true, toJson: true,
   date: true, isRead: true, isFlagged: true, isAnswered: true, hasAttachments: true, size: true,
   inReplyTo: true,
@@ -74,6 +75,34 @@ export const messageRepository = {
   async accountIdsForUser(userId: string) {
     const accounts = await prisma.mailAccount.findMany({ where: { userId }, select: { id: true } })
     return accounts.map(a => a.id)
+  },
+
+  // "Caixa geral": INBOX de todas as contas do usuário numa lista só, igual
+  // "Todas as caixas de entrada" do Gmail. specialUse é o jeito correto de
+  // achar a INBOX (setado pelo worker no sync), mas contas antigas ou
+  // servidores que não mandam esse atributo IMAP caem no fallback por
+  // path/nome — mesma checagem que o frontend já usa pra achar a INBOX.
+  async listUnifiedInbox(userId: string, limit: number, cursor?: string) {
+    const where: Record<string, unknown> = {
+      folder: {
+        account: { userId },
+        OR: [
+          { specialUse: '\\Inbox' },
+          { path: 'INBOX' },
+          { name: { equals: 'inbox', mode: 'insensitive' } },
+        ],
+      },
+    }
+    if (cursor) {
+      const { date, id } = parseCursor(cursor)
+      where.OR = [{ date: { lt: date } }, { date, id: { lt: id } }]
+    }
+    return prisma.message.findMany({
+      where,
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: LIST_SELECT,
+    })
   },
 
   async search(accountIds: string[], where: Record<string, unknown>, limit = 50) {

@@ -55,6 +55,7 @@ import { extractError } from '../services/errorMessage'
 import { useMailStore } from '../stores/mail'
 
 interface ComposeMessage {
+  accountId?: string
   fromEmail?: string | null
   subject?: string | null
   date: string
@@ -126,7 +127,11 @@ watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
   if (!msg) { isReply.value = false; if (!props.forwardMsg) resetComposeState(); return }
   isReply.value = true
   isForward.value = false
-  form.accountId = mail.selectedAccountId || ''
+  // Na Caixa Geral (ou numa etiqueta) não existe "conta selecionada" — a
+  // mensagem sendo respondida já sabe de qual conta ela veio, e é sempre
+  // essa a conta certa pra responder, não a que porventura estava
+  // selecionada antes de abrir a caixa geral.
+  form.accountId = msg.accountId || mail.selectedAccountId || ''
   attachments.value = []
 
   const ownEmail = mail.accounts.find(a => a.id === form.accountId)?.emailAddress?.toLowerCase() ?? ''
@@ -158,7 +163,7 @@ watch(() => props.forwardMsg, (msg) => {
   if (!msg) { isForward.value = false; if (!props.replyTo) resetComposeState(); return }
   isForward.value = true
   isReply.value = false
-  form.accountId = mail.selectedAccountId || ''
+  form.accountId = msg.accountId || mail.selectedAccountId || ''
   attachments.value = []
   form.to = ''
   form.cc = ''

@@ -79,7 +79,7 @@ export const labelRepository = {
       orderBy: [{ date: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
-        id: true, uid: true, subject: true, preview: true,
+        id: true, accountId: true, uid: true, subject: true, preview: true,
         fromName: true, fromEmail: true, toJson: true,
         date: true, isRead: true, isFlagged: true, hasAttachments: true, size: true,
       },

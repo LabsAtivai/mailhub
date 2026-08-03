@@ -16,7 +16,7 @@ export interface Folder {
   unreadCount: number; totalMessages: number
 }
 export interface MessageSummary {
-  id: string; uid: string; subject: string | null; preview: string | null
+  id: string; accountId?: string; uid: string; subject: string | null; preview: string | null
   fromName: string | null; fromEmail: string | null; toJson: string
   date: string; isRead: boolean; isFlagged: boolean; isAnswered: boolean; hasAttachments: boolean; size: number | null
   inReplyTo: string | null
@@ -47,6 +47,7 @@ export const useMailStore = defineStore('mail', () => {
   const connected = ref(false)
   const searchResults = shallowRef<MessageSummary[]>([])
   const searchQuery = ref('')
+  const unifiedActive = ref(false)
   const syncProgress = ref<Record<string, { state: string; progress?: number; currentFolder?: string }>>({})
 
   // ── accounts ───────────────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ export const useMailStore = defineStore('mail', () => {
 
   // ── folder / messages ──────────────────────────────────────────────────────
   async function selectFolder(accountId: string, folderId: string) {
+    unifiedActive.value = false
     selectedAccountId.value = accountId
     selectedFolderId.value = folderId
     selectedMessage.value = null
@@ -146,6 +148,52 @@ export const useMailStore = defineStore('mail', () => {
     } finally {
       loadingMessages.value = false
     }
+  }
+
+  // ── caixa geral (INBOX de todas as contas, estilo "Todas as caixas" do Gmail) ─
+  async function loadUnifiedInbox() {
+    unifiedActive.value = true
+    selectedFolderId.value = null
+    selectedAccountId.value = null
+    selectedMessage.value = null
+    searchQuery.value = ''
+    searchResults.value = []
+    messages.value = []
+    nextCursor.value = null
+    clearSelection()
+    loadingMessages.value = true
+    try {
+      const { data } = await api.get('/messages/unified', { params: { limit: 50 } })
+      messages.value = data.items
+      nextCursor.value = data.nextCursor
+    } catch {
+      messages.value = []
+    } finally {
+      loadingMessages.value = false
+    }
+  }
+
+  async function loadMoreUnified() {
+    if (!nextCursor.value) return
+    loadingMessages.value = true
+    try {
+      const { data } = await api.get('/messages/unified', { params: { limit: 50, cursor: nextCursor.value } })
+      messages.value = [...messages.value, ...data.items]
+      nextCursor.value = data.nextCursor
+    } finally {
+      loadingMessages.value = false
+    }
+  }
+
+  // usado pelo mail:new pra saber se uma mensagem nova pertence a alguma
+  // INBOX (de qualquer conta) enquanto o usuário está na caixa geral —
+  // mesma checagem de fallback specialUse/path/nome usada no resto do app.
+  function isInboxFolderId(folderId: string): boolean {
+    for (const folders of Object.values(foldersByAccount.value)) {
+      const f = folders.find(x => x.id === folderId)
+      if (f) return f.specialUse === '\\Inbox' || f.path === 'INBOX' || f.name.toLowerCase() === 'inbox'
+    }
+    return false
   }
 
   // ── search ─────────────────────────────────────────────────────────────────
@@ -251,6 +299,7 @@ export const useMailStore = defineStore('mail', () => {
 
   // ── label view ─────────────────────────────────────────────────────────────
   async function loadLabelMessages(_labelId: string, items: MessageSummary[], cursor: string | null) {
+    unifiedActive.value = false
     selectedFolderId.value = null
     selectedAccountId.value = null
     selectedMessage.value = null
@@ -288,12 +337,13 @@ export const useMailStore = defineStore('mail', () => {
     for (const id of accountIds) socket.emit('join:account', id)
 
     // ── mail events ──────────────────────────────────────────────────────────
-    socket.on('mail:new', (payload: { messageId: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string; inReplyTo?: string | null; selfSent?: boolean }) => {
-      if (payload.folderId === selectedFolderId.value) {
+    socket.on('mail:new', (payload: { messageId: string; accountId?: string; folderId: string; subject?: string; fromName?: string; fromEmail?: string; inReplyTo?: string | null; selfSent?: boolean }) => {
+      const matchesUnified = unifiedActive.value && isInboxFolderId(payload.folderId)
+      if (payload.folderId === selectedFolderId.value || matchesUnified) {
         const exists = messages.value.some(x => x.id === payload.messageId)
         if (!exists) {
           messages.value = [{
-            id: payload.messageId, uid: '', subject: payload.subject ?? null,
+            id: payload.messageId, accountId: payload.accountId, uid: '', subject: payload.subject ?? null,
             preview: null, fromName: payload.fromName ?? null, fromEmail: payload.fromEmail ?? null,
             toJson: '[]', date: new Date().toISOString(),
             isRead: !!payload.selfSent, isFlagged: false, isAnswered: false, hasAttachments: false, size: null,
@@ -401,10 +451,10 @@ export const useMailStore = defineStore('mail', () => {
   return {
     accounts, foldersByAccount, selectedAccountId, selectedFolderId,
     messages, nextCursor, selectedMessage, selectedIds, searchResults, searchQuery,
-    loadingMessages, loadingMessage, connected, syncProgress,
+    loadingMessages, loadingMessage, connected, syncProgress, unifiedActive,
     fetchAccounts, fetchFolders, refreshAccount, selectFolder, loadMessages,
     selectMessage, refreshMessage, toggleFlag, toggleRead, deleteMessage,
-    search, loadLabelMessages,
+    search, loadLabelMessages, loadUnifiedInbox, loadMoreUnified,
     toggleSelectMessage, selectAllMessages, clearSelection, bulkMarkRead, bulkDelete,
   }
 })

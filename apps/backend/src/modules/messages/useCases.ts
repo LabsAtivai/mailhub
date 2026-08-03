@@ -53,6 +53,22 @@ export const messageUseCases = {
     return { items: items.map(m => ({ ...m, labels: m.labels.map(ml => ml.label) })), nextCursor }
   },
 
+  async listUnifiedInbox(userId: string, limit: number, cursor?: string) {
+    const accountIds = await repo.accountIdsForUser(userId)
+    // Toca atividade de TODAS as contas, não só as que têm mensagem na página
+    // atual — quem vive na caixa geral nunca abre uma conta individualmente,
+    // e sem isso essas contas nunca seriam marcadas ativas pra ganhar IDLE
+    // permanente (ver ACCOUNT_ACTIVE_THRESHOLD_MS em lib/accountActivity.ts).
+    await Promise.all(accountIds.map(id => touchAccountActivity(id)))
+    const rows = await repo.listUnifiedInbox(userId, limit, cursor)
+    const hasMore = rows.length > limit
+    const items = hasMore ? rows.slice(0, limit) : rows
+    const nextCursor = hasMore
+      ? `${items[items.length - 1].date.toISOString()}_${items[items.length - 1].id}`
+      : null
+    return { items: items.map(m => ({ ...m, labels: m.labels.map(ml => ml.label) })), nextCursor }
+  },
+
   async getDetail(messageId: string, userId: string) {
     const msg = await requireOwnedMessage(messageId, userId)
     const labels = msg.labels.map(ml => ml.label)

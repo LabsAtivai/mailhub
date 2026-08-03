@@ -36,6 +36,15 @@ router.get('/folders/:folderId/messages', async (req: AuthRequest, res: Response
   } catch (err) { handle(res, err) }
 })
 
+// GET /messages/unified — caixa geral: INBOX de todas as contas do usuário
+router.get('/messages/unified', async (req: AuthRequest, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 100)
+    const result = await uc.listUnifiedInbox(req.userId!, limit, req.query.cursor as string | undefined)
+    res.json(result)
+  } catch (err) { handle(res, err) }
+})
+
 // GET /messages/search?q=
 router.get('/messages/search', async (req: AuthRequest, res: Response) => {
   try {
