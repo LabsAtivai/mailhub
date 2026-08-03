@@ -106,7 +106,16 @@ router.delete('/messages/:id/labels/:labelId', async (req: AuthRequest, res: Res
 // GET /attachments/:id/download
 router.get('/attachments/:id/download', async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await uc.requestAttachment(req.params.id, req.userId!))
+    const result = await uc.requestAttachment(req.params.id, req.userId!)
+    if (result.ready) {
+      res.setHeader('Content-Type', result.mimeType || 'application/octet-stream')
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`)
+      res.send(result.content)
+      return
+    }
+    // 202: pedido aceito, mas o conteúdo ainda não está pronto (worker vai
+    // buscar). O front tenta de novo em instantes.
+    res.status(202).json(result)
   } catch (err) { handle(res, err) }
 })
 

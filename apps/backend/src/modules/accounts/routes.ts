@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express'
 import { z } from 'zod'
+import rateLimit from 'express-rate-limit'
 import { prisma } from '../../lib/prisma'
 import { encrypt } from '../../lib/crypto'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
@@ -10,6 +11,18 @@ import { isPrivateHost } from '../../lib/ssrf'
 const log = scope('accounts')
 const router = Router()
 router.use(requireAuth)
+
+// POST /test e POST / fazem resolução de DNS + tentativa de conexão real
+// (até 20s cada) — sem limite, dá pra usar como oráculo pra varrer host/porta
+// interno em sequência, além do custo de rede em si.
+const connectionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthRequest).userId || req.ip || 'unknown',
+  message: { error: 'Muitas tentativas de conexão, aguarde alguns minutos' },
+})
 
 function wrap(fn: (req: AuthRequest, res: Response) => Promise<void>) {
   return (req: AuthRequest, res: Response, next: NextFunction) => fn(req, res).catch(next)
@@ -44,7 +57,7 @@ router.get('/', wrap(async (req: AuthRequest, res: Response) => {
 }))
 
 // POST /accounts/test
-router.post('/test', wrap(async (req: AuthRequest, res: Response) => {
+router.post('/test', connectionLimiter, wrap(async (req: AuthRequest, res: Response) => {
   const parsed = AccountSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   const d = parsed.data
@@ -76,7 +89,7 @@ router.post('/test', wrap(async (req: AuthRequest, res: Response) => {
 }))
 
 // POST /accounts
-router.post('/', wrap(async (req: AuthRequest, res: Response) => {
+router.post('/', connectionLimiter, wrap(async (req: AuthRequest, res: Response) => {
   const parsed = AccountSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   const d = parsed.data

@@ -17,11 +17,11 @@ export const SendAttachmentSchema = z.object({
 
 export const SendMailSchema = z.object({
   accountId: z.string().uuid(),
-  to: z.array(z.string().email()).min(1),
-  cc: z.array(z.string().email()).optional(),
-  subject: z.string(),
-  html: z.string(),
-  text: z.string().optional(),
+  to: z.array(z.string().email()).min(1).max(50),
+  cc: z.array(z.string().email()).max(50).optional(),
+  subject: z.string().max(500),
+  html: z.string().max(2_000_000),
+  text: z.string().max(2_000_000).optional(),
   inReplyTo: z.string().optional(),
   attachments: z.array(SendAttachmentSchema).max(10).optional(),
 })

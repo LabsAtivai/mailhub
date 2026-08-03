@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
   throw new Error('JWT_SECRET must be set and at least 16 characters')
@@ -40,4 +40,13 @@ export function verifyAccess(token: string): JwtPayload {
 
 export function verifyRefresh(token: string): JwtPayload {
   return validatePayload(jwt.verify(token, REFRESH_SECRET))
+}
+
+// RefreshToken.token guarda esse hash, nunca o JWT em si — um vazamento de
+// backup/réplica do banco não é mais suficiente pra reutilizar sessões
+// válidas por até 7 dias. SHA-256 (não Argon2) de propósito: aqui é lookup
+// por igualdade num valor já de alta entropia (o próprio JWT), não senha de
+// usuário — não precisa de custo computacional alto, só evitar texto puro.
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
 }

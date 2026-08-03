@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express'
 import argon2 from 'argon2'
+import rateLimit from 'express-rate-limit'
 import { prisma } from '../../lib/prisma'
 import { encrypt } from '../../lib/crypto'
 import { redis } from '../../lib/redis'
@@ -11,6 +12,22 @@ import { z } from 'zod'
 const log = scope('admin')
 const router = Router()
 router.use(requireAuth, requireAdmin)
+
+// Token admin vazado/comprometido não deveria conseguir automatizar ações
+// sensíveis (trocar senha de qualquer usuário, criar/excluir conta) sem
+// fricção nenhuma — só nas rotas de escrita, GETs de listagem ficam livres.
+const adminWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthRequest).userId || req.ip || 'unknown',
+  message: { error: 'Muitas alterações em pouco tempo, aguarde alguns minutos' },
+})
+router.use((req, res, next) => {
+  if (req.method === 'GET') return next()
+  return adminWriteLimiter(req, res, next)
+})
 
 function wrap(fn: (req: AuthRequest, res: Response) => Promise<void>) {
   return (req: AuthRequest, res: Response, next: NextFunction) => fn(req, res).catch(next)

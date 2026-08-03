@@ -1,4 +1,6 @@
 import 'dotenv/config'
+import { initSentry, Sentry, sentryEnabled } from './lib/sentry'
+initSentry()
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
@@ -11,6 +13,7 @@ import { prisma } from './lib/prisma'
 import { verifyAccess } from './lib/jwt'
 import { decrypt } from './lib/crypto'
 import { logger } from './lib/logger'
+import { isPrivateHost } from './lib/ssrf'
 
 import authRoutes from './modules/auth/routes'
 import accountRoutes from './modules/accounts/routes'
@@ -68,6 +71,19 @@ app.use('/accounts', folderRoutes)
 app.use('/', messageRoutes)
 app.use('/labels', labelRoutes)
 app.use('/admin', adminRoutes)
+
+if (sentryEnabled) Sentry.setupExpressErrorHandler(app)
+
+// Nenhuma rota tinha isso antes: um throw síncrono ou uma Promise rejeitada
+// não capturada num handler async (Express 4 não repassa isso pra next()
+// sozinho) virava página de erro padrão do Express — ou, em alguns casos,
+// unhandledRejection sem handler nenhum. Isso garante resposta 500 previsível
+// e loga (e reporta ao Sentry, se configurado) em vez de vazar stack trace.
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error({ err: err.message, stack: err.stack }, 'unhandled route error')
+  if (res.headersSent) return
+  res.status(500).json({ error: 'Erro interno' })
+})
 
 // ── Socket.IO auth ──────────────────────────────────────────────────────────
 io.use((socket, next) => {
@@ -148,6 +164,10 @@ async function forwardIfEnabled(accountId: string, messageId: string) {
   if (!msg) return
 
   const isSendGrid = account.outgoingHost === 'smtp.sendgrid.net'
+  if (!isSendGrid && await isPrivateHost(account.outgoingHost)) {
+    logger.error({ accountId, host: account.outgoingHost }, 'forward blocked: host inválido (SSRF)')
+    return
+  }
   const smtpAuth = isSendGrid
     ? { user: 'apikey', pass: process.env.SENDGRID_API_KEY ?? '' }
     : { user: account.username, pass: decrypt(account.encryptedPassword) }
@@ -198,3 +218,12 @@ async function shutdown(signal: string) {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
+
+process.on('uncaughtException', (err: Error) => {
+  logger.error({ err: err.message, stack: err.stack }, 'uncaught exception')
+  Sentry.captureException(err)
+})
+process.on('unhandledRejection', (reason: unknown) => {
+  logger.error({ err: reason instanceof Error ? reason.message : String(reason) }, 'unhandled rejection')
+  Sentry.captureException(reason)
+})

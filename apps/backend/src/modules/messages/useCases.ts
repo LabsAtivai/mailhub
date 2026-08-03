@@ -5,6 +5,7 @@ import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
 import { decrypt } from '../../lib/crypto'
 import { touchAccountActivity } from '../../lib/accountActivity'
+import { isPrivateHost } from '../../lib/ssrf'
 
 const log = scope('messages')
 
@@ -158,6 +159,13 @@ export const messageUseCases = {
     }
 
     const isSendGrid = account.outgoingHost === 'smtp.sendgrid.net'
+    // SSRF só era validado no cadastro da conta; entre aquele momento e cada
+    // envio (dias/semanas depois) o DNS do host pode ter mudado pra apontar
+    // pra rede interna (rebinding). smtp.sendgrid.net é host fixo confiável,
+    // não precisa revalidar.
+    if (!isSendGrid && await isPrivateHost(account.outgoingHost)) {
+      throw new SmtpError('Host de saída inválido')
+    }
     const smtpAuth = isSendGrid
       ? { user: 'apikey', pass: process.env.SENDGRID_API_KEY ?? '' }
       : { user: account.username, pass: decrypt(account.encryptedPassword) }
@@ -244,6 +252,18 @@ export const messageUseCases = {
     if (!attachment) throw new NotFoundError('Anexo não encontrado')
     const msg = await requireOwnedMessage(attachment.messageId, userId)
 
+    // O worker já pode ter buscado e cacheado o conteúdo numa chamada
+    // anterior (ver worker/index.ts, handleFetchAttachment) — se tiver,
+    // serve o arquivo de verdade em vez de pedir pra tentar de novo.
+    const cachedB64 = await redis.get(`mailhub:attachment:${attachmentId}`)
+    if (cachedB64) {
+      return {
+        ready: true as const,
+        filename: attachment.filename, mimeType: attachment.mimeType,
+        content: Buffer.from(cachedB64, 'base64'),
+      }
+    }
+
     if (!msg.bodyFetchedAt) {
       await redis.publish('mailhub:fetch:body', JSON.stringify({ messageId: msg.id }))
     }
@@ -253,6 +273,7 @@ export const messageUseCases = {
       uid: msg.uid.toString(), filename: attachment.filename, contentId: attachment.contentId,
     }))
     return {
+      ready: false as const,
       id: attachment.id, filename: attachment.filename,
       mimeType: attachment.mimeType, size: attachment.size, downloadPending: true,
     }

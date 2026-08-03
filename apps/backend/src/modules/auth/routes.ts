@@ -3,7 +3,7 @@ import argon2 from 'argon2'
 import { z } from 'zod'
 import rateLimit from 'express-rate-limit'
 import { prisma } from '../../lib/prisma'
-import { signAccess, signRefresh, verifyRefresh } from '../../lib/jwt'
+import { signAccess, signRefresh, verifyRefresh, hashRefreshToken } from '../../lib/jwt'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
 import { v4 as uuid } from 'uuid'
 import { scope } from '../../lib/logger'
@@ -53,7 +53,7 @@ router.post('/register', authLimiter, wrap(async (req: Request, res: Response) =
   const access = signAccess({ userId: user.id, email: user.email })
   const refresh = signRefresh({ userId: user.id, email: user.email })
   await prisma.refreshToken.create({
-    data: { id: uuid(), token: refresh, userId: user.id, expiresAt: new Date(Date.now() + 7 * 864e5) }
+    data: { id: uuid(), token: hashRefreshToken(refresh), userId: user.id, expiresAt: new Date(Date.now() + 7 * 864e5) }
   })
 
   log.info({ userId: user.id }, 'user registered')
@@ -74,7 +74,7 @@ router.post('/login', authLimiter, wrap(async (req: Request, res: Response) => {
   const access = signAccess({ userId: user.id, email: user.email })
   const refresh = signRefresh({ userId: user.id, email: user.email })
   await prisma.refreshToken.create({
-    data: { id: uuid(), token: refresh, userId: user.id, expiresAt: new Date(Date.now() + 7 * 864e5) }
+    data: { id: uuid(), token: hashRefreshToken(refresh), userId: user.id, expiresAt: new Date(Date.now() + 7 * 864e5) }
   })
 
   log.info({ userId: user.id }, 'user logged in')
@@ -87,16 +87,17 @@ router.post('/refresh', authLimiter, wrap(async (req: Request, res: Response) =>
 
   try {
     const payload = verifyRefresh(refresh)
-    const stored = await prisma.refreshToken.findUnique({ where: { token: refresh } })
+    const tokenHash = hashRefreshToken(refresh)
+    const stored = await prisma.refreshToken.findUnique({ where: { token: tokenHash } })
     if (!stored || stored.expiresAt < new Date()) {
       res.status(401).json({ error: 'Refresh token expired or revoked' }); return
     }
     // rotate
-    await prisma.refreshToken.delete({ where: { token: refresh } })
+    await prisma.refreshToken.delete({ where: { token: tokenHash } })
     const newAccess = signAccess({ userId: payload.userId, email: payload.email })
     const newRefresh = signRefresh({ userId: payload.userId, email: payload.email })
     await prisma.refreshToken.create({
-      data: { id: uuid(), token: newRefresh, userId: payload.userId, expiresAt: new Date(Date.now() + 7 * 864e5) }
+      data: { id: uuid(), token: hashRefreshToken(newRefresh), userId: payload.userId, expiresAt: new Date(Date.now() + 7 * 864e5) }
     })
     res.json({ access: newAccess, refresh: newRefresh })
   } catch {
@@ -106,7 +107,7 @@ router.post('/refresh', authLimiter, wrap(async (req: Request, res: Response) =>
 
 router.post('/logout', requireAuth, wrap(async (req: AuthRequest, res: Response) => {
   const { refresh } = req.body
-  if (refresh) await prisma.refreshToken.deleteMany({ where: { token: refresh, userId: req.userId! } })
+  if (refresh) await prisma.refreshToken.deleteMany({ where: { token: hashRefreshToken(refresh), userId: req.userId! } })
   res.json({ ok: true })
 }))
 
