@@ -75,6 +75,7 @@ services:
       PORT: ${PORT}
       NODE_ENV: ${NODE_ENV}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 30s
@@ -109,6 +110,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       NODE_ENV: ${NODE_ENV}
       IMAP_PROXY_URL: ${IMAP_PROXY_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     deploy:
       resources:
         limits:

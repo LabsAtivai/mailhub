@@ -31,8 +31,69 @@ jobs:
               - 'apps/frontend/**'
               - '.github/workflows/deploy.yml'
 
-  build-backend:
+  check-backend:
     needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: apps/backend/package-lock.json }
+      - run: npm ci
+        working-directory: apps/backend
+      - run: npm run lint
+        working-directory: apps/backend
+      - run: npm run typecheck
+        working-directory: apps/backend
+      - run: npm test
+        working-directory: apps/backend
+      - run: npm run build
+        working-directory: apps/backend
+
+  check-worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: apps/worker/package-lock.json }
+      - run: npm ci
+        working-directory: apps/worker
+      - run: npm run lint
+        working-directory: apps/worker
+      - run: npm run typecheck
+        working-directory: apps/worker
+      - run: npm test
+        working-directory: apps/worker
+      - run: npm run build
+        working-directory: apps/worker
+
+  check-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: apps/frontend/package-lock.json }
+      - run: npm ci
+        working-directory: apps/frontend
+      - run: npm run lint
+        working-directory: apps/frontend
+      - run: npm run typecheck
+        working-directory: apps/frontend
+      - run: npm test
+        working-directory: apps/frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/frontend
+      - run: npm run test:e2e
+        working-directory: apps/frontend
+      - run: npm run build
+        working-directory: apps/frontend
+
+  build-backend:
+    needs: [changes, check-backend]
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -57,7 +118,7 @@ jobs:
         continue-on-error: true
 
   build-worker:
-    needs: changes
+    needs: [changes, check-worker]
     if: needs.changes.outputs.worker == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -82,7 +143,7 @@ jobs:
         continue-on-error: true
 
   build-frontend:
-    needs: changes
+    needs: [changes, check-frontend]
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -104,6 +165,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.ORG }}/mailhub-frontend:${{ github.sha }}
           build-args: |
             VITE_API_URL=${{ secrets.VITE_API_URL }}
+            VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
       - name: Trigger Portainer
         run: curl -s -X POST "${{ secrets.PORTAINER_WEBHOOK_FRONTEND }}"
         continue-on-error: true
