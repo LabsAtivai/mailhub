@@ -4,7 +4,7 @@ initSentry()
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, syncMessages, refreshCounts, fetchBody, refreshFlags, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS, SYNC_DAYS } from './sync/syncAccount'
+import { syncAccount, syncMessages, refreshCounts, purgeExpiredTrash, fetchBody, refreshFlags, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS, SYNC_DAYS } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 import { AccountSerialQueue } from './lib/serialQueue'
@@ -194,7 +194,7 @@ async function handleMove(payload: MovePayload) {
   // mantém o contador de não lidos dela correto sem precisar do sync inteiro.
   const since = new Date(Date.now() - SYNC_DAYS * 864e5)
   await Promise.all([
-    syncMessages(client, accountId, target.id, target.path, since),
+    syncMessages(client, accountId, target.id, target.path, since, false, target.specialUse === '\\Trash'),
     refreshCounts(accountId, sourceFolderId),
   ])
 }
@@ -228,7 +228,7 @@ async function handleDelete(payload: DeletePayload) {
   if (trash) {
     const since = new Date(Date.now() - SYNC_DAYS * 864e5)
     await Promise.all([
-      syncMessages(client, accountId, trash.id, trash.path, since),
+      syncMessages(client, accountId, trash.id, trash.path, since, false, true),
       refreshCounts(accountId, folderId),
     ])
   } else {
@@ -370,11 +370,12 @@ async function handleFetchAttachment(payload: AttachmentPayload) {
   }
 }
 
-// ── concurrency-limited sync runner ─────────────────────────────────────────
+// ── concurrency-limited task runner ─────────────────────────────────────────
 async function runWithConcurrency(
   ids: string[],
   concurrency: number,
   label: string,
+  task: (id: string) => Promise<void> = syncAccount,
 ): Promise<void> {
   const queue = [...ids]
   const results: Array<{ id: string; error?: string }> = []
@@ -382,7 +383,7 @@ async function runWithConcurrency(
     while (queue.length > 0) {
       const id = queue.shift()!
       try {
-        await syncAccount(id)
+        await task(id)
         results.push({ id })
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e)
@@ -414,6 +415,26 @@ setInterval(async () => {
     logger.error({ err: errMsg }, 'periodic sync scheduler error')
   }
 }, 30 * 60 * 1000)
+
+// ── expurgo automático da Lixeira a cada 6 horas ────────────────────────────
+// Prazo de 15 dias tem folga de sobra — não precisa do intervalo curto do
+// sync. runSerialForAccount evita competir com IDLE/sync/delete em andamento
+// da mesma conta pelo lock de mailbox (getMailboxLock).
+setInterval(async () => {
+  try {
+    const accounts = await prisma.mailAccount.findMany({
+      where: { syncEnabled: true },
+      select: { id: true }
+    })
+    await runWithConcurrency(
+      accounts.map(a => a.id), 5, 'trash-purge',
+      id => runSerialForAccount(id, () => purgeExpiredTrash(id)),
+    )
+  } catch (err) {
+    const errMsg = err instanceof Error ? (err as Error).message : String(err)
+    logger.error({ err: errMsg }, 'trash purge scheduler error')
+  }
+}, 6 * 60 * 60 * 1000)
 
 // ── boot: reset stale SYNCING states + sync only recently-active accounts ──
 // Contas inativas já são cobertas pelo ciclo periódico (30min) — não faz

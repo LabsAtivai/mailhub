@@ -91,6 +91,7 @@ model Message {
   bodyFetchedAt  DateTime?
   size           Int?
   createdAt      DateTime       @default(now())
+  trashedAt      DateTime?
   folder         Folder         @relation(fields: [folderId], references: [id], onDelete: Cascade)
   attachments    Attachment[]
   labels         MessageLabel[]
@@ -98,6 +99,7 @@ model Message {
   @@unique([accountId, folderId, uid])
   @@index([folderId, date(sort: Desc)])
   @@index([accountId, messageId])
+  @@index([folderId, trashedAt])
   @@index([accountId, isRead])
   @@index([accountId, isFlagged])
   @@index([accountId, date(sort: Desc)])

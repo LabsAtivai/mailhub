@@ -119,7 +119,7 @@ export async function syncAccount(accountId: string): Promise<void> {
         create: { accountId, path: imapFolder.path, name: imapFolder.name, specialUse },
         update: { name: imapFolder.name, specialUse },
       })
-      await syncMessages(client, accountId, folder.id, imapFolder.path, since, specialUse === '\\Sent')
+      await syncMessages(client, accountId, folder.id, imapFolder.path, since, specialUse === '\\Sent', specialUse === '\\Trash')
       done++
       await redis.publish('account:syncState', JSON.stringify({
         accountId, state: 'SYNCING',
@@ -168,7 +168,7 @@ interface MailboxInfo {
 
 export async function syncMessages(
   client: ImapFlow, accountId: string,
-  folderId: string, folderPath: string, since: Date, isSentFolder = false
+  folderId: string, folderPath: string, since: Date, isSentFolder = false, isTrashFolder = false
 ): Promise<void> {
   let lock
   try { lock = await client.getMailboxLock(folderPath) }
@@ -193,10 +193,10 @@ export async function syncMessages(
     const isFirstSync = !storedUidValidity || storedUidValidity !== serverUidValidity
 
     if (isFirstSync) {
-      await batchFetchAndUpsert(client, accountId, folderId, { since }, false, isSentFolder)
+      await batchFetchAndUpsert(client, accountId, folderId, { since }, false, isSentFolder, isTrashFolder)
     } else if (serverUidNext > storedUidNext) {
       const range = `${storedUidNext}:*`
-      await batchFetchAndUpsert(client, accountId, folderId, range, true, isSentFolder, { uid: true })
+      await batchFetchAndUpsert(client, accountId, folderId, range, true, isSentFolder, isTrashFolder, { uid: true })
     }
 
     if (!isFirstSync) {
@@ -239,6 +239,7 @@ async function batchFetchAndUpsert(
   range: unknown,
   notify: boolean,
   isSentFolder = false,
+  isTrashFolder = false,
   options?: object
 ): Promise<void> {
   const batch: Array<Record<string, unknown>> = []
@@ -250,11 +251,11 @@ async function batchFetchAndUpsert(
   )) {
     batch.push(msg as unknown as Record<string, unknown>)
     if (batch.length >= BATCH_SIZE) {
-      await upsertBatch(accountId, folderId, batch, notify, isSentFolder)
+      await upsertBatch(accountId, folderId, batch, notify, isSentFolder, isTrashFolder)
       batch.length = 0
     }
   }
-  if (batch.length > 0) await upsertBatch(accountId, folderId, batch, notify, isSentFolder)
+  if (batch.length > 0) await upsertBatch(accountId, folderId, batch, notify, isSentFolder, isTrashFolder)
 }
 
 interface Envelope {
@@ -268,7 +269,8 @@ interface Envelope {
 }
 
 async function upsertBatch(
-  accountId: string, folderId: string, msgs: Array<Record<string, unknown>>, notify: boolean, isSentFolder = false
+  accountId: string, folderId: string, msgs: Array<Record<string, unknown>>, notify: boolean,
+  isSentFolder = false, isTrashFolder = false
 ): Promise<void> {
   const uids = msgs.map(m => BigInt(m.uid as number))
 
@@ -319,6 +321,12 @@ async function upsertBatch(
         isRead, isFlagged, isAnswered,
         hasAttachments: hasAttach(msg.bodyStructure),
         size: (msg.size as number) || 0,
+        // "date" é a data do e-mail (do remetente), não de quando entrou na
+        // Lixeira — usar ela pro prazo de expurgo faria e-mail antigo
+        // deletado hoje já nascer "vencido". trashedAt marca a hora real de
+        // quando essa linha apareceu numa pasta \Trash (só no create; um
+        // update de flags não deve reiniciar a contagem).
+        trashedAt: isTrashFolder ? new Date() : null,
       })
       // Fora da Sent, uma cópia auto-enviada é a anomalia que motivou a supressão
       // (provedor devolvendo o envio na INBOX como se fosse resposta nova) — não
@@ -385,6 +393,52 @@ export async function refreshCounts(accountId: string, folderId: string): Promis
   ])
   await prisma.folder.update({ where: { id: folderId }, data: { totalMessages, unreadCount } })
   await redis.publish('folder:counts', JSON.stringify({ accountId, folderId, unreadCount, totalMessages }))
+}
+
+// ── expurgo automático da Lixeira ────────────────────────────────────────────
+export const TRASH_RETENTION_DAYS = 15
+
+// Expunge de verdade (IMAP + banco) do que já passou do prazo na Lixeira —
+// mesma ideia do "esvaziar automaticamente" do Gmail. Só entra aqui quem já
+// tem trashedAt (setado no sync ao ver a mensagem pela primeira vez numa
+// pasta \Trash), então mensagem antiga movida pra lixeira hoje começa a
+// contar o prazo a partir de hoje, não da data do e-mail.
+export async function purgeExpiredTrash(accountId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 864e5)
+  const expired = await prisma.message.findMany({
+    where: { accountId, trashedAt: { lt: cutoff }, folder: { specialUse: '\\Trash' } },
+    select: { id: true, uid: true, folderId: true, folder: { select: { path: true } } },
+  })
+  if (expired.length === 0) return
+
+  const byFolder = new Map<string, { path: string; uids: bigint[]; ids: string[] }>()
+  for (const m of expired) {
+    const entry = byFolder.get(m.folderId) ?? { path: m.folder.path, uids: [], ids: [] }
+    entry.uids.push(m.uid)
+    entry.ids.push(m.id)
+    byFolder.set(m.folderId, entry)
+  }
+
+  const client = await getOpsClient(accountId)
+  for (const [folderId, { path, uids, ids }] of byFolder) {
+    let lock
+    try { lock = await client.getMailboxLock(path) }
+    catch (err: unknown) {
+      log.warn({ accountId, path, err: err instanceof Error ? err.message : String(err) }, 'cannot open trash folder for purge')
+      continue
+    }
+    try {
+      await client.messageDelete(uids.map(u => u.toString()).join(','), { uid: true })
+    } catch (err: unknown) {
+      log.error({ accountId, path, err: err instanceof Error ? err.message : String(err) }, 'purge trash failed')
+      continue
+    } finally {
+      lock.release()
+    }
+    await prisma.message.deleteMany({ where: { id: { in: ids } } })
+    await refreshCounts(accountId, folderId)
+    log.info({ accountId, folderId, count: ids.length }, 'expired trash messages purged')
+  }
 }
 
 // ── IMAP IDLE ────────────────────────────────────────────────────────────────
@@ -459,8 +513,8 @@ async function handleNewMessages(client: ImapFlow, accountId: string, data: { co
   if (!folder) return
 
   const storedUidNext = folder.uidNext ?? BigInt(1)
-  // IDLE só observa a INBOX, nunca a pasta Sent.
-  await batchFetchAndUpsert(client, accountId, folder.id, `${storedUidNext}:*`, true, false, { uid: true })
+  // IDLE só observa a INBOX, nunca a pasta Sent nem a Lixeira.
+  await batchFetchAndUpsert(client, accountId, folder.id, `${storedUidNext}:*`, true, false, false, { uid: true })
 
   const mailbox = client.mailbox as MailboxInfo | undefined
   const newUidNext = BigInt(mailbox?.uidNext ?? storedUidNext)
