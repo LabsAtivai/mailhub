@@ -4,7 +4,7 @@ initSentry()
 import { z } from 'zod'
 import { redis } from './lib/redis'
 import { pool } from './lib/imapPool'
-import { syncAccount, fetchBody, refreshFlags, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS } from './sync/syncAccount'
+import { syncAccount, syncMessages, refreshCounts, fetchBody, refreshFlags, getInteractiveClient, markRecentlySent, ACCOUNT_ACTIVE_THRESHOLD_MS, SYNC_DAYS } from './sync/syncAccount'
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 import { AccountSerialQueue } from './lib/serialQueue'
@@ -184,7 +184,19 @@ async function handleMove(payload: MovePayload) {
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId: sourceFolderId }))
   // Sem isso, a mensagem some da pasta de origem mas só aparece na pasta de
   // destino no próximo sync periódico (até 30min) — o usuário acha que sumiu.
-  await syncAccount(accountId)
+  // syncAccount(accountId) completo (TODAS as pastas) era caro demais pra
+  // rodar aqui: numa triagem com vários move/delete seguidos da MESMA conta,
+  // cada um fila atrás do resync completo do anterior (fila serial por
+  // conta) — se o usuário recarregasse antes da fila esvaziar, via mensagem
+  // "voltando" porque o delete dela ainda nem tinha rodado. Sincronizar só a
+  // pasta de destino resolve o mesmo problema sem o custo de vasculhar pastas
+  // que não mudaram; refreshCounts na origem (sem IMAP, só COUNT no Postgres)
+  // mantém o contador de não lidos dela correto sem precisar do sync inteiro.
+  const since = new Date(Date.now() - SYNC_DAYS * 864e5)
+  await Promise.all([
+    syncMessages(client, accountId, target.id, target.path, since),
+    refreshCounts(accountId, sourceFolderId),
+  ])
 }
 
 interface DeletePayload { accountId: string; uid: string; messageId: string; folderId: string; trashFolderId?: string | null }
@@ -196,9 +208,10 @@ async function handleDelete(payload: DeletePayload) {
 
   const client = await getInteractiveClient(accountId)
   const lock = await client.getMailboxLock(source.path)
+  let trash: { id: string; path: string } | null = null
   try {
     if (trashFolderId) {
-      const trash = await prisma.folder.findUnique({ where: { id: trashFolderId } })
+      trash = await prisma.folder.findUnique({ where: { id: trashFolderId } })
       if (trash) await client.messageMove(uid, trash.path, { uid: true })
     } else {
       await client.messageDelete(uid, { uid: true })
@@ -211,7 +224,16 @@ async function handleDelete(payload: DeletePayload) {
   await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId }))
   // Mesma razão do handleMove: sem isso a mensagem só aparece na Lixeira no
   // próximo sync periódico quando foi um soft-delete (moveu pra trashFolderId).
-  if (trashFolderId) await syncAccount(accountId)
+  // Só a pasta de destino, não a conta inteira (ver comentário em handleMove).
+  if (trash) {
+    const since = new Date(Date.now() - SYNC_DAYS * 864e5)
+    await Promise.all([
+      syncMessages(client, accountId, trash.id, trash.path, since),
+      refreshCounts(accountId, folderId),
+    ])
+  } else {
+    await refreshCounts(accountId, folderId)
+  }
 }
 
 // Tenta achar a pasta Sent de verdade no servidor (não só o que já foi

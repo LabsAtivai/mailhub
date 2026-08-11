@@ -9,7 +9,7 @@ import { isPrivateHost } from '../lib/ssrf'
 
 const log = scope('sync')
 
-const SYNC_DAYS = 90
+export const SYNC_DAYS = 90
 const BATCH_SIZE = 200
 
 // Mitigação pro estouro de conexões IMAP simultâneas contra o host
@@ -166,7 +166,7 @@ interface MailboxInfo {
   uidNext?: number | bigint
 }
 
-async function syncMessages(
+export async function syncMessages(
   client: ImapFlow, accountId: string,
   folderId: string, folderPath: string, since: Date, isSentFolder = false
 ): Promise<void> {
@@ -378,7 +378,7 @@ function hasAttach(struct: unknown): boolean {
   return false
 }
 
-async function refreshCounts(accountId: string, folderId: string): Promise<void> {
+export async function refreshCounts(accountId: string, folderId: string): Promise<void> {
   const [totalMessages, unreadCount] = await Promise.all([
     prisma.message.count({ where: { folderId } }),
     prisma.message.count({ where: { folderId, isRead: false } }),
