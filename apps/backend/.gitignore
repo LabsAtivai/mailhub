@@ -4,3 +4,5 @@ dist/
 .env.*
 *.log
 seed_users_prod.sql
+logins_*.csv
+test_*.csv
