@@ -75,6 +75,11 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       NODE_ENV: development
       IMAP_PROXY_URL: ${IMAP_PROXY_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      REPORT_EMAIL_FROM: ${REPORT_EMAIL_FROM:-}
+      REPORT_EMAIL_TO: ${REPORT_EMAIL_TO:-labs.ativaai@gmail.com}
     networks:
       - mailhub-dev-net
 

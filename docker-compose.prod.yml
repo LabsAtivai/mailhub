@@ -111,6 +111,11 @@ services:
       NODE_ENV: ${NODE_ENV}
       IMAP_PROXY_URL: ${IMAP_PROXY_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      REPORT_EMAIL_FROM: ${REPORT_EMAIL_FROM:-}
+      REPORT_EMAIL_TO: ${REPORT_EMAIL_TO:-labs.ativaai@gmail.com}
     deploy:
       resources:
         limits:

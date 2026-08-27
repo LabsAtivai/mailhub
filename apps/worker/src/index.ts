@@ -8,6 +8,7 @@ import { syncAccount, syncMessages, refreshCounts, purgeExpiredTrash, fetchBody,
 import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 import { AccountSerialQueue } from './lib/serialQueue'
+import { runDailyReport } from './report/dailyReport'
 
 logger.info('starting mailhub-worker')
 if (process.env.IMAP_PROXY_URL) {
@@ -320,6 +321,24 @@ async function handleSentAppend(payload: { accountId: string; messageId?: string
 
   await syncAccount(accountId)
 
+  // Corpo é lazy-loaded por padrão (AP-007) — só é buscado quando alguém abre
+  // a mensagem. Um e-mail que o próprio usuário acabou de mandar raramente é
+  // reaberto, então sem isso o corpo nunca seria buscado e a mensagem nunca
+  // entraria no índice de IA (que exige textBody). Busca o corpo aqui, uma
+  // vez, pra fechar esse gap — o resto do pipeline (mail:bodyReady →
+  // indexação) já existe e reage sozinho.
+  if (messageId) {
+    const sentMsg = await prisma.message.findFirst({
+      where: { accountId, messageId, bodyFetchedAt: null },
+      select: { id: true },
+    })
+    if (sentMsg) {
+      await fetchBody(sentMsg.id).catch((err: unknown) =>
+        logger.error({ accountId, messageId: sentMsg.id, err: err instanceof Error ? err.message : String(err) }, 'failed to eager-fetch body of just-sent message')
+      )
+    }
+  }
+
   // Sem isso, uma causa de infra (cota de disco estourada, por exemplo) fica
   // invisível pro time — só aparece cavando log do worker, como aconteceu
   // aqui. Só aplica se o resync acima não tiver já marcado a conta com ERROR
@@ -435,6 +454,36 @@ setInterval(async () => {
     logger.error({ err: errMsg }, 'trash purge scheduler error')
   }
 }, 6 * 60 * 60 * 1000)
+
+// ── relatório diário de triagem (16h horário de Brasília) ──────────────────
+// Sem lib de cron (mesmo padrão dos outros schedulers deste arquivo): checa a
+// cada minuto se bateu 16:00 em America/Sao_Paulo. Lock no Redis (NX + expira
+// em 24h) evita mandar o relatório 2x se o worker reiniciar dentro da mesma
+// janela do minuto certo. Se a rodada falhar (ex: OpenAI fora do ar), não
+// tenta de novo no mesmo dia — próxima tentativa é 16:00 do dia seguinte.
+function saoPauloNow(): { dateKey: string; hhmm: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(new Date())
+  const get = (type: string) => parts.find(p => p.type === type)?.value || ''
+  return { dateKey: `${get('year')}-${get('month')}-${get('day')}`, hhmm: `${get('hour')}:${get('minute')}` }
+}
+
+setInterval(async () => {
+  const { dateKey, hhmm } = saoPauloNow()
+  if (hhmm !== '16:00') return
+
+  const lockKey = `mailhub:report:sent:${dateKey}`
+  const acquired = await redis.set(lockKey, '1', 'EX', 24 * 60 * 60, 'NX')
+  if (!acquired) return
+
+  try {
+    await runDailyReport(dateKey)
+  } catch (err) {
+    logger.error({ dateKey, err: err instanceof Error ? err.message : String(err) }, 'daily report scheduler error')
+  }
+}, 60 * 1000)
 
 // ── boot: reset stale SYNCING states + sync only recently-active accounts ──
 // Contas inativas já são cobertas pelo ciclo periódico (30min) — não faz
