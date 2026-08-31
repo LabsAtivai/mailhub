@@ -36,6 +36,16 @@
         </div>
       </div>
 
+      <!-- relatório diário de triagem -->
+      <div class="report-card">
+        <div class="report-info">
+          <div class="report-title">Relatório diário de triagem</div>
+          <div class="report-subtitle">Roda automático às 16h. Use o botão pra disparar fora do horário.</div>
+        </div>
+        <Button label="Rodar agora" icon="pi pi-send" size="small"
+          :loading="runningReport" @click="runReportNow" />
+      </div>
+
       <!-- tabs -->
       <div class="tab-bar">
         <button :class="{ active: tab === 'users' }" @click="tab = 'users'">Usuarios</button>
@@ -307,6 +317,8 @@ const newAcc = reactive({
   username: '', password: '', tlsMode: 'TLS',
 })
 
+const runningReport = ref(false)
+
 const showConfirmDelete = ref(false)
 const confirmMsg = ref('')
 let pendingDelete: (() => Promise<void>) | null = null
@@ -454,6 +466,18 @@ async function forceSync(accountId: string) {
   }
 }
 
+async function runReportNow() {
+  runningReport.value = true
+  try {
+    await api.post('/admin/report/run')
+    toast.add({ severity: 'info', summary: 'Relatório disparado — chega por email em instantes', life: 3000 })
+  } catch (e: unknown) {
+    toast.add({ severity: 'error', summary: extractAdminError(e, 'Erro ao disparar relatório'), life: 3000 })
+  } finally {
+    runningReport.value = false
+  }
+}
+
 async function toggleSync(accountId: string, enabled: boolean) {
   try {
     await api.patch(`/admin/accounts/${accountId}`, { syncEnabled: enabled })
@@ -521,6 +545,14 @@ onMounted(loadData)
 .stat-card.error { border-left: 3px solid #f44336; }
 .stat-value { font-size: 1.6rem; font-weight: 700; color: #1a1a1a; }
 .stat-label { font-size: .75rem; color: #888; margin-top: .2rem; text-transform: uppercase; letter-spacing: .04em; }
+
+.report-card {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #fff; border-radius: 10px; padding: .9rem 1.1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 1.2rem;
+}
+.report-title { font-size: .9rem; font-weight: 600; color: #1a1a1a; }
+.report-subtitle { font-size: .78rem; color: #888; margin-top: .15rem; }
 
 .tab-bar { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 2px solid #e0e0e0; }
 .tab-bar button {

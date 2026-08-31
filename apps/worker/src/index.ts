@@ -45,6 +45,7 @@ sub.subscribe(
   'mailhub:message:delete',
   'mailhub:sent:append',
   'mailhub:fetch:attachment',
+  'mailhub:report:run',
   (err) => { if (err) logger.error({ err }, 'redis subscribe error') }
 )
 
@@ -121,6 +122,23 @@ sub.on('message', async (channel: string, message: string) => {
       case 'mailhub:fetch:attachment': {
         const p = FetchAttachmentSchema.parse(raw)
         await runSerialForAccount(p.accountId, () => handleFetchAttachment(p))
+        break
+      }
+      case 'mailhub:report:run': {
+        // Disparo manual (botão no admin) — ignora o lock diário do
+        // agendador de propósito, pra permitir reenviar o relatório quantas
+        // vezes precisar durante teste. Só evita dois cliques simultâneos
+        // rodando a classificação em paralelo.
+        const running = await redis.set('mailhub:report:running', '1', 'EX', 5 * 60, 'NX')
+        if (!running) { logger.warn('daily report manual trigger ignored — already running'); break }
+        try {
+          const { dateKey } = saoPauloNow()
+          await runDailyReport(dateKey)
+        } catch (err) {
+          logger.error({ err: err instanceof Error ? err.message : String(err) }, 'daily report manual trigger error')
+        } finally {
+          await redis.del('mailhub:report:running')
+        }
         break
       }
     }

@@ -272,4 +272,13 @@ router.post('/accounts/:id/sync', wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
+// POST /admin/report/run — dispara o relatório diário de triagem fora do
+// horário agendado (16h), pra teste/conferência manual. dateKey é calculado
+// pelo worker (mesmo fuso America/Sao_Paulo do agendador).
+router.post('/report/run', wrap(async (req, res) => {
+  await redis.publish('mailhub:report:run', JSON.stringify({}))
+  log.info({ adminId: req.userId }, 'daily report triggered manually by admin')
+  res.status(202).json({ ok: true })
+}))
+
 export default router
