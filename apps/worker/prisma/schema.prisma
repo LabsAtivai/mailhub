@@ -2,14 +2,12 @@
 // Nao edite aqui. Rode: npm run schema:sync
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [vector]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -105,7 +103,6 @@ model Message {
   folder         Folder         @relation(fields: [folderId], references: [id], onDelete: Cascade)
   attachments    Attachment[]
   labels         MessageLabel[]
-  embedding      MessageEmbedding?
 
   @@unique([accountId, folderId, uid])
   @@index([folderId, date(sort: Desc)])
@@ -163,16 +160,4 @@ model ClientProfile {
   account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@unique([accountId, domain])
-}
-
-// Embedding do corpo de mensagens da pasta Sent, usado pra busca semântica
-// (RAG) de respostas anteriores parecidas na geração de rascunho por IA.
-// Coluna vector é Unsupported: Prisma Client não lê/escreve nela diretamente,
-// só via $queryRaw/$executeRaw (ver modules/ai/repository.ts).
-model MessageEmbedding {
-  messageId String                @id
-  embedding Unsupported("vector(1536)")
-  model     String
-  createdAt DateTime              @default(now())
-  message   Message               @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }

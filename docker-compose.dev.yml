@@ -1,7 +1,7 @@
 services:
 
   mailhub-dev-postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16-alpine
     container_name: mailhub-dev-postgres
     restart: unless-stopped
     environment:
