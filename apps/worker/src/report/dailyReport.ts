@@ -55,17 +55,19 @@ export async function runDailyReport(dateKey: string): Promise<void> {
   const reports: AccountReport[] = []
 
   for (const account of accounts) {
-    const inbox = await prisma.folder.findFirst({
-      where: { accountId: account.id, specialUse: '\\Inbox' },
+    // Inbox + Spam: resposta de lead às vezes cai no Spam (falso positivo do
+    // provedor), e essas são justamente as que mais importa não perder.
+    const scannedFolders = await prisma.folder.findMany({
+      where: { accountId: account.id, specialUse: { in: ['\\Inbox', '\\Junk'] } },
       select: { id: true },
     })
 
     const counts = EMPTY_COUNTS()
     const interested: AccountReport['interested'] = []
 
-    if (inbox) {
+    if (scannedFolders.length > 0) {
       const messages = await prisma.message.findMany({
-        where: { folderId: inbox.id, date: { gte: startOfDay, lte: endOfDay } },
+        where: { folderId: { in: scannedFolders.map(f => f.id) }, date: { gte: startOfDay, lte: endOfDay } },
         select: {
           id: true, subject: true, textBody: true, htmlBody: true, bodyFetchedAt: true,
           fromEmail: true, fromName: true, leadStatus: true,
