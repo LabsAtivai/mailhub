@@ -15,9 +15,11 @@ const SYSTEM_INSTRUCTIONS = `
 Você classifica respostas de e-mail recebidas em resposta a uma cadência de prospecção fria (cold outbound, via Snov.io). Dado o assunto e o corpo do e-mail recebido, classifique em EXATAMENTE uma categoria:
 
 - "interessado": demonstra interesse real no que foi oferecido, pede mais informação, quer agendar conversa/reunião/demo.
-- "encaminhamento": indica outra pessoa, setor ou contato pra continuar a conversa (ex: "encaminhei pro responsável", "fale com fulano@empresa.com").
+- "encaminhamento": uma PESSOA, escrevendo ativamente sobre o assunto da cadência, diz que encaminhou ou vai encaminhar a conversa pra outra pessoa/setor (ex: "encaminhei pro responsável", "fale com fulano@empresa.com").
 - "negado": recusa explícita, diz que não tem interesse, pede pra não receber mais e-mails/remoção da lista.
 - "outro": qualquer coisa que não se encaixe claramente acima — resposta automática/fora do escritório, bounce, newsletter, spam, mensagem ambígua ou sem relação com a cadência.
+
+IMPORTANTE: resposta automática de ausência/fora do escritório é SEMPRE "outro", mesmo quando o texto automático cita outro nome/e-mail pra redirecionar as mensagens (ex: "estarei ausente até dia X, favor direcionar para fulano@empresa.com") — isso é um autoresponder mecânico, não uma pessoa encaminhando a conversa de verdade. Sinais de autoresponder: menção a período de ausência/férias, texto genérico sem relação com o assunto específico enviado, ausência de saudação pessoal. Prefixo "[EXTERNO]" no assunto é só uma tag de segurança de e-mail corporativo, não indica nada sobre o conteúdo.
 
 Responda APENAS um JSON no formato {"category": "interessado"|"encaminhamento"|"negado"|"outro"}. Nada além disso.
 `.trim()
