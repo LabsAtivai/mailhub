@@ -45,6 +45,13 @@ model MailAccount {
   lastSyncAt        DateTime?
   lastActiveAt      DateTime?
   lastError         String?
+  // Hosts compartilhados (HostGator/cPanel) devolvem "Authentication failed"
+  // tanto pra senha errada quanto pra rejeição por throttling/sobrecarga de
+  // LVE — não dá pra distinguir pelo texto do erro. Só desativa o sync de
+  // verdade depois de N falhas consecutivas (ver AUTH_FAILURE_THRESHOLD no
+  // worker), não na primeira, pra não travar conta com senha correta por
+  // causa de um blip de conexão. Zera em qualquer sync bem-sucedido.
+  authFailureCount  Int       @default(0)
   forwardEnabled    Boolean   @default(false)
   forwardTo         String?
   createdAt         DateTime  @default(now())

@@ -21,6 +21,10 @@ const BATCH_SIZE = 200
 // (a cada 30min, ver worker/index.ts) em vez de conexão permanente.
 export const ACCOUNT_ACTIVE_THRESHOLD_MS = 60 * 60 * 1000 // 1h
 
+// Nº de falhas de "Authentication failed" seguidas antes de desativar o
+// sync de verdade — ver comentário no catch de syncAccount().
+const AUTH_FAILURE_THRESHOLD = 3
+
 // Alguns provedores (ex: HostGator/cPanel) devolvem uma cópia da mensagem
 // recém-enviada via SMTP diretamente na INBOX (não só na pasta Sent), o que
 // fazia essa cópia ser tratada como e-mail novo recebido (badge de não lido +
@@ -130,7 +134,7 @@ export async function syncAccount(accountId: string): Promise<void> {
 
     await prisma.mailAccount.update({
       where: { id: accountId },
-      data: { syncState: 'IDLE', lastSyncAt: new Date(), lastError: null }
+      data: { syncState: 'IDLE', lastSyncAt: new Date(), lastError: null, authFailureCount: 0 }
     })
     await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'IDLE', progress: 100 }))
 
@@ -148,13 +152,28 @@ export async function syncAccount(accountId: string): Promise<void> {
     const errMsg = e?.responseText ?? e?.serverResponseCode ?? (err instanceof Error ? err.message : String(err))
     const errCode = String(e?.serverResponseCode ?? '')
     const isAuthError = errCode === 'AUTHENTICATIONFAILED' || String(errMsg).toLowerCase().includes('authentication failed')
-    log.error({ accountId, err: String(errMsg), code: errCode, disabledSync: isAuthError }, 'sync failed')
+
+    // "Authentication failed" do host compartilhado não é confiável — pode
+    // ser senha errada de verdade ou rejeição por throttling/LVE, e o texto
+    // devolvido é o mesmo pros dois casos. Só desativa o sync depois de
+    // AUTH_FAILURE_THRESHOLD falhas seguidas (zeradas em qualquer sync ok),
+    // não na primeira — evita travar conta com senha correta por causa de
+    // um blip de sobrecarga do host.
+    const nextAuthFailureCount = isAuthError ? account.authFailureCount + 1 : account.authFailureCount
+    const disableSync = isAuthError && nextAuthFailureCount >= AUTH_FAILURE_THRESHOLD
+
+    log.error({
+      accountId, err: String(errMsg), code: errCode,
+      isAuthError, authFailureCount: nextAuthFailureCount, disabledSync: disableSync,
+    }, 'sync failed')
+
     await prisma.mailAccount.update({
       where: { id: accountId },
       data: {
         syncState: 'ERROR',
         lastError: String(errMsg),
-        ...(isAuthError ? { syncEnabled: false } : {}),
+        authFailureCount: nextAuthFailureCount,
+        ...(disableSync ? { syncEnabled: false } : {}),
       }
     })
     await redis.publish('account:syncState', JSON.stringify({ accountId, state: 'ERROR', error: String(errMsg) }))
