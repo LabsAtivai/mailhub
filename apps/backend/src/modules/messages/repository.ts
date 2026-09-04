@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma'
+import { excludeNoiseWhere } from './noiseFilter'
 
 export interface MessageListItem {
   id: string
@@ -59,7 +60,7 @@ export const messageRepository = {
 
   // listing
   async listByFolder(folderId: string, limit: number, cursor?: string) {
-    const where: Record<string, unknown> = { folderId }
+    const where: Record<string, unknown> = { folderId, ...excludeNoiseWhere() }
     if (cursor) {
       const { date, id } = parseCursor(cursor)
       where.OR = [{ date: { lt: date } }, { date, id: { lt: id } }]
@@ -92,6 +93,7 @@ export const messageRepository = {
           { name: { equals: 'inbox', mode: 'insensitive' } },
         ],
       },
+      ...excludeNoiseWhere(),
     }
     if (cursor) {
       const { date, id } = parseCursor(cursor)
