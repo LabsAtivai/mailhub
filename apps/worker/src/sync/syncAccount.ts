@@ -6,6 +6,7 @@ import { redis } from '../lib/redis'
 import { pool } from '../lib/imapPool'
 import { scope }  from '../lib/logger'
 import { isPrivateHost } from '../lib/ssrf'
+import { excludeNoiseWhere } from '../lib/noiseFilter'
 
 const log = scope('sync')
 
@@ -406,9 +407,11 @@ function hasAttach(struct: unknown): boolean {
 }
 
 export async function refreshCounts(accountId: string, folderId: string): Promise<void> {
+  // Contagem exclui o mesmo ruído que a listagem do backend já esconde
+  // (noiseFilter) — senão o badge mostra número maior que a lista visível.
   const [totalMessages, unreadCount] = await Promise.all([
-    prisma.message.count({ where: { folderId } }),
-    prisma.message.count({ where: { folderId, isRead: false } }),
+    prisma.message.count({ where: { folderId, ...excludeNoiseWhere() } }),
+    prisma.message.count({ where: { folderId, isRead: false, ...excludeNoiseWhere() } }),
   ])
   await prisma.folder.update({ where: { id: folderId }, data: { totalMessages, unreadCount } })
   await redis.publish('folder:counts', JSON.stringify({ accountId, folderId, unreadCount, totalMessages }))

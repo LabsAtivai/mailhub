@@ -40,7 +40,7 @@
       <div class="report-card">
         <div class="report-info">
           <div class="report-title">Relatório diário de triagem</div>
-          <div class="report-subtitle">Roda automático às 16h. Use o botão pra disparar fora do horário.</div>
+          <div class="report-subtitle">Roda automático às 15h. Use o botão pra disparar fora do horário.</div>
         </div>
         <Button label="Rodar agora" icon="pi pi-send" size="small"
           :loading="runningReport" @click="runReportNow" />

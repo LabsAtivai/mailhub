@@ -1,8 +1,8 @@
-// Ruído conhecido que nunca deve aparecer na visualização de e-mails (herdado
-// dos filtros do Gmail antigo — ver relatorios/mailhub-mvp, filtro exportado
-// do Gmail): warmup automático, bounces técnicos, notificação de segurança de
-// e-mail corporativo e teste do Snov.io. IMAP continua fonte de verdade —
-// isso só esconde da listagem, não apaga nem move nada.
+// Espelho de apps/backend/src/modules/messages/noiseFilter.ts — sem
+// packages/shared entre os repos (ver CLAUDE.md), então essa lista precisa
+// ser mantida igual nos dois lugares manualmente. Usado só pra refreshCounts
+// não contar como "não lido" o que a listagem do backend já esconde; IMAP e
+// a mensagem em si continuam intactos.
 const NOISE_SUBJECT_CONTAINS = [
   '[WRM]',
   'Testing your new email with Snov.io',
