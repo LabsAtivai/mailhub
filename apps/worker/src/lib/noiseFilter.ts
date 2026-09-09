@@ -4,6 +4,7 @@
 // não contar como "não lido" o que a listagem do backend já esconde; IMAP e
 // a mensagem em si continuam intactos.
 const NOISE_SUBJECT_CONTAINS = [
+  '(WRM)',
   '[WRM]',
   'Testing your new email with Snov.io',
   'Resposta automatica',

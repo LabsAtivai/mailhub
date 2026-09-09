@@ -4,6 +4,7 @@
 // e-mail corporativo e teste do Snov.io. IMAP continua fonte de verdade —
 // isso só esconde da listagem, não apaga nem move nada.
 const NOISE_SUBJECT_CONTAINS = [
+  '(WRM)',
   '[WRM]',
   'Testing your new email with Snov.io',
   'Resposta automatica',

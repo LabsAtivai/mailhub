@@ -75,9 +75,10 @@ export async function runDailyReport(dateKey: string): Promise<void> {
       })
 
       for (const msg of messages) {
-        // Tag "[WRM]" no assunto = warmup automático de deliverability, não é
-        // resposta de lead. Nem entra na contagem nem é classificado.
-        if (/\[WRM\]/i.test(msg.subject || '')) continue
+        // Tag "(WRM)" no assunto = warmup automático de deliverability, não é
+        // resposta de lead. Nem entra na contagem nem é classificado. Assunto
+        // real usa parênteses — bracket cobre variante que nunca apareceu.
+        if (/\(WRM\)|\[WRM\]/i.test(msg.subject || '')) continue
 
         let status = msg.leadStatus as LeadStatus | null
 
