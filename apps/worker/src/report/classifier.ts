@@ -54,3 +54,53 @@ export async function classifyReply(subject: string, body: string): Promise<Lead
 
   return VALID_STATUSES.includes(category as LeadStatus) ? (category as LeadStatus) : 'outro'
 }
+
+const SUMMARY_INSTRUCTIONS = `
+Você resume, em 1 linha curta, uma resposta de e-mail classificada como "interessado" numa cadência de prospecção fria. Dado remetente, assunto e corpo, extraia:
+
+- "company": nome curto da empresa do remetente (sem LTDA/S.A./ME e sem artigo), inferido do domínio do e-mail ou da assinatura. Se não der pra inferir com confiança, use string vazia "".
+- "note": frase curta (até 8 palavras), começando com verbo no passado (ex: "respondeu sobre X", "pediu mais informações sobre Y", "quer agendar reunião"), descrevendo objetivamente o que a pessoa disse — sem repetir o nome dela, sem ponto final duplicado.
+
+Responda APENAS um JSON no formato {"company": "...", "note": "..."}. Nada além disso.
+`.trim()
+
+export async function summarizeInterestedLead(input: {
+  fromName: string | null
+  fromEmail: string
+  subject: string
+  body: string
+}): Promise<{ company: string; note: string }> {
+  const fallback = { company: '', note: 'respondeu ao contato' }
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey()}` },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        response_format: { type: 'json_object' },
+        temperature: 0,
+        max_tokens: 80,
+        messages: [
+          { role: 'system', content: SUMMARY_INSTRUCTIONS },
+          {
+            role: 'user',
+            content: `Remetente: ${input.fromName || '(sem nome)'} <${input.fromEmail}>\nAssunto: ${input.subject || '(sem assunto)'}\n\n${(input.body || '(sem corpo)').slice(0, 4000)}`,
+          },
+        ],
+      }),
+    })
+
+    const data: any = await res.json().catch(() => null)
+    if (!res.ok) throw new OpenAiError(data?.error?.message || `Erro da OpenAI ao resumir (${res.status})`)
+
+    const parsed = JSON.parse(data?.choices?.[0]?.message?.content ?? '{}')
+    return {
+      company: typeof parsed.company === 'string' ? parsed.company.trim() : '',
+      note: typeof parsed.note === 'string' && parsed.note.trim() ? parsed.note.trim() : fallback.note,
+    }
+  } catch {
+    // Resumo é enriquecimento cosmético do relatório — se a IA falhar aqui,
+    // não pode derrubar o relatório inteiro (classificação já foi salva).
+    return fallback
+  }
+}

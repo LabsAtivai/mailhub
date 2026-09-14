@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma'
 import { scope } from '../lib/logger'
 import { fetchBody } from '../sync/syncAccount'
-import { classifyReply, LeadStatus } from './classifier'
+import { classifyReply, summarizeInterestedLead, LeadStatus } from './classifier'
 import { sendReportEmail } from './mailer'
 
 const log = scope('report')
@@ -33,12 +33,12 @@ async function ensureLabel(userId: string, status: LeadStatus) {
   return prisma.label.create({ data: { userId, name, color } })
 }
 
-interface AccountReport {
+export interface AccountReport {
   displayName: string
   emailAddress: string
   syncIssue: string | null
   counts: Record<LeadStatus, number>
-  interested: Array<{ email: string; name: string | null; subject: string | null }>
+  interested: Array<{ email: string; name: string | null; subject: string | null; company: string; note: string }>
 }
 
 export async function runDailyReport(dateKey: string): Promise<void> {
@@ -81,18 +81,23 @@ export async function runDailyReport(dateKey: string): Promise<void> {
         if (/\(WRM\)|\[WRM\]/i.test(msg.subject || '')) continue
 
         let status = msg.leadStatus as LeadStatus | null
+        let bodyText: string | null = null
+        const resolveBody = async (): Promise<string> => {
+          if (bodyText !== null) return bodyText
+          if (!msg.bodyFetchedAt) await fetchBody(msg.id)
+          const fresh = await prisma.message.findUnique({
+            where: { id: msg.id },
+            select: { textBody: true, htmlBody: true },
+          })
+          bodyText = fresh?.textBody || (fresh?.htmlBody ? stripHtml(fresh.htmlBody) : '')
+          return bodyText
+        }
 
         // Idempotente: mensagem já classificada numa rodada anterior do mesmo
         // dia (ex: worker reiniciou) não é reclassificada nem paga IA de novo.
         if (!status) {
           try {
-            if (!msg.bodyFetchedAt) await fetchBody(msg.id)
-            const fresh = await prisma.message.findUnique({
-              where: { id: msg.id },
-              select: { textBody: true, htmlBody: true },
-            })
-            const body = fresh?.textBody || (fresh?.htmlBody ? stripHtml(fresh.htmlBody) : '')
-            status = await classifyReply(msg.subject || '', body)
+            status = await classifyReply(msg.subject || '', await resolveBody())
           } catch (err) {
             log.error({ messageId: msg.id, err: err instanceof Error ? err.message : String(err) }, 'daily report: falha ao classificar, marcando como outro')
             status = 'outro'
@@ -113,7 +118,16 @@ export async function runDailyReport(dateKey: string): Promise<void> {
 
         counts[status]++
         if (status === 'interessado') {
-          interested.push({ email: msg.fromEmail || '(sem remetente)', name: msg.fromName, subject: msg.subject })
+          // Resumo (company/note) é só pro corpo do relatório — recalculado a
+          // cada execução (não persistido), custo baixo pq só roda pros
+          // classificados como interessado, não pra caixa inteira.
+          const { company, note } = await summarizeInterestedLead({
+            fromName: msg.fromName,
+            fromEmail: msg.fromEmail || '',
+            subject: msg.subject || '',
+            body: await resolveBody(),
+          })
+          interested.push({ email: msg.fromEmail || '(sem remetente)', name: msg.fromName, subject: msg.subject, company, note })
         }
       }
     }
@@ -132,35 +146,55 @@ export async function runDailyReport(dateKey: string): Promise<void> {
   log.info({ dateKey, accounts: reports.length }, 'daily report: finished')
 }
 
-function buildReportText(dateKey: string, reports: AccountReport[]): string {
+function formatDateShort(dateKey: string): string {
+  const [, month, day] = dateKey.split('-')
+  return `${day}/${month}`
+}
+
+function leadLine(i: AccountReport['interested'][number]): string {
+  const person = i.name || i.email
+  const companyPart = i.company ? ` (${i.company})` : ''
+  return `${person}${companyPart} — ${i.note}.`
+}
+
+export function buildReportText(dateKey: string, reports: AccountReport[]): string {
   const lines: string[] = []
-  lines.push(`MailHub — Relatório de Triagem — ${dateKey}`)
-  lines.push('')
 
   const totals = EMPTY_COUNTS()
   const problems: AccountReport[] = []
-
   for (const r of reports) {
-    lines.push(`=== ${r.emailAddress} (${r.displayName}) ===`)
-    lines.push(`Interessados: ${r.counts.interessado}`)
-    for (const i of r.interested) {
-      lines.push(`  - ${i.email}${i.name ? ` (${i.name})` : ''} — "${i.subject || '(sem assunto)'}"`)
-    }
-    lines.push(`Encaminhamentos: ${r.counts.encaminhamento}`)
-    lines.push(`Negados: ${r.counts.negado}`)
-    lines.push(`Outros: ${r.counts.outro}`)
-    lines.push('')
-
     ;(Object.keys(totals) as LeadStatus[]).forEach(k => { totals[k] += r.counts[k] })
     if (r.syncIssue) problems.push(r)
   }
 
-  if (problems.length > 0) {
-    lines.push('--- Contas com problema de sincronização (dados podem estar incompletos) ---')
-    for (const p of problems) lines.push(`${p.emailAddress} — último erro: "${p.syncIssue}"`)
-    lines.push('')
+  lines.push(`📌 *Resumo — Interessados e Encaminhamentos | ${formatDateShort(dateKey)}*`)
+  lines.push('')
+
+  lines.push(`🔥 *INTERESSADOS — ${totals.interessado}*`)
+  lines.push('')
+  for (const r of reports) {
+    if (r.interested.length === 0) continue
+    if (r.interested.length === 1) {
+      lines.push(`• *${r.displayName}:* ${leadLine(r.interested[0])}`)
+    } else {
+      lines.push(`• *${r.displayName}:*`)
+      for (const i of r.interested) lines.push(`   - ${leadLine(i)}`)
+    }
+  }
+  lines.push('')
+
+  lines.push(`📤 *ENCAMINHAMENTOS — ${totals.encaminhamento}*`)
+  lines.push('')
+  for (const r of reports) {
+    if (r.counts.encaminhamento === 0) continue
+    lines.push(`• *${r.displayName}:* ${r.counts.encaminhamento} encaminhamento${r.counts.encaminhamento > 1 ? 's' : ''}`)
   }
 
-  lines.push(`TOTAIS GERAIS: Interessados ${totals.interessado} | Encaminhamentos ${totals.encaminhamento} | Negados ${totals.negado} | Outros ${totals.outro}`)
+  if (problems.length > 0) {
+    lines.push('')
+    lines.push('⚠️ *Contas com problema de sincronização (dados podem estar incompletos)*')
+    for (const p of problems) lines.push(`• ${p.emailAddress} — último erro: "${p.syncIssue}"`)
+  }
+
   return lines.join('\n')
 }

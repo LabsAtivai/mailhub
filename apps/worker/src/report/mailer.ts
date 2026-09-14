@@ -23,7 +23,7 @@ export async function sendReportEmail(dateKey: string, txt: string): Promise<voi
       personalizations: [{ to: [{ email: to }] }],
       from: { email: from, name: 'MailHub' },
       subject: `MailHub — Relatório de Triagem — ${dateKey}`,
-      content: [{ type: 'text/plain', value: 'Relatório do dia em anexo.' }],
+      content: [{ type: 'text/plain', value: txt }],
       attachments: [{
         content: Buffer.from(txt, 'utf-8').toString('base64'),
         filename: `mailhub-relatorio-${dateKey}.txt`,
