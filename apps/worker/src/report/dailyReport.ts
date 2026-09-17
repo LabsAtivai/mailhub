@@ -13,12 +13,14 @@ const log = scope('report')
 // novas.
 const LABEL_BY_STATUS: Record<LeadStatus, { name: string; color: string }> = {
   interessado: { name: 'Interessados', color: '#4CAF50' },
+  apresentacao: { name: 'Apresentação', color: '#2196F3' },
   encaminhamento: { name: 'Encaminhamentos', color: '#9C27B0' },
   negado: { name: 'Negado', color: '#D32F2F' },
+  automatico: { name: 'Automático', color: '#607D8B' },
   outro: { name: 'Outro', color: '#9E9E9E' },
 }
 
-const EMPTY_COUNTS = (): Record<LeadStatus, number> => ({ interessado: 0, encaminhamento: 0, negado: 0, outro: 0 })
+const EMPTY_COUNTS = (): Record<LeadStatus, number> => ({ interessado: 0, apresentacao: 0, encaminhamento: 0, negado: 0, automatico: 0, outro: 0 })
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -39,6 +41,7 @@ export interface AccountReport {
   syncIssue: string | null
   counts: Record<LeadStatus, number>
   interested: Array<{ email: string; name: string | null; subject: string | null; company: string; note: string }>
+  presentations: Array<{ email: string; name: string | null; subject: string | null; company: string; note: string }>
 }
 
 export async function runDailyReport(dateKey: string): Promise<void> {
@@ -64,6 +67,7 @@ export async function runDailyReport(dateKey: string): Promise<void> {
 
     const counts = EMPTY_COUNTS()
     const interested: AccountReport['interested'] = []
+    const presentations: AccountReport['presentations'] = []
 
     if (scannedFolders.length > 0) {
       const messages = await prisma.message.findMany({
@@ -117,17 +121,19 @@ export async function runDailyReport(dateKey: string): Promise<void> {
         }
 
         counts[status]++
-        if (status === 'interessado') {
+        if (status === 'interessado' || status === 'apresentacao') {
           // Resumo (company/note) é só pro corpo do relatório — recalculado a
           // cada execução (não persistido), custo baixo pq só roda pros
-          // classificados como interessado, não pra caixa inteira.
+          // classificados como interessado/apresentacao, não pra caixa inteira.
           const { company, note } = await summarizeInterestedLead({
             fromName: msg.fromName,
             fromEmail: msg.fromEmail || '',
             subject: msg.subject || '',
             body: await resolveBody(),
           })
-          interested.push({ email: msg.fromEmail || '(sem remetente)', name: msg.fromName, subject: msg.subject, company, note })
+          const entry = { email: msg.fromEmail || '(sem remetente)', name: msg.fromName, subject: msg.subject, company, note }
+          if (status === 'interessado') interested.push(entry)
+          else presentations.push(entry)
         }
       }
     }
@@ -138,6 +144,7 @@ export async function runDailyReport(dateKey: string): Promise<void> {
       syncIssue: account.syncState === 'ERROR' ? (account.lastError || 'erro de sincronização') : null,
       counts,
       interested,
+      presentations,
     })
   }
 
@@ -167,7 +174,7 @@ export function buildReportText(dateKey: string, reports: AccountReport[]): stri
     if (r.syncIssue) problems.push(r)
   }
 
-  lines.push(`📌 *Resumo — Interessados e Encaminhamentos | ${formatDateShort(dateKey)}*`)
+  lines.push(`📌 *Resumo — Interessados, Apresentações e Encaminhamentos | ${formatDateShort(dateKey)}*`)
   lines.push('')
 
   lines.push(`🔥 *INTERESSADOS — ${totals.interessado}*`)
@@ -183,11 +190,34 @@ export function buildReportText(dateKey: string, reports: AccountReport[]): stri
   }
   lines.push('')
 
+  lines.push(`📎 *APRESENTAÇÕES (aguardando envio de material) — ${totals.apresentacao}*`)
+  lines.push('')
+  for (const r of reports) {
+    if (r.presentations.length === 0) continue
+    if (r.presentations.length === 1) {
+      lines.push(`• *${r.displayName}:* ${leadLine(r.presentations[0])}`)
+    } else {
+      lines.push(`• *${r.displayName}:*`)
+      for (const i of r.presentations) lines.push(`   - ${leadLine(i)}`)
+    }
+  }
+  lines.push('')
+
   lines.push(`📤 *ENCAMINHAMENTOS — ${totals.encaminhamento}*`)
   lines.push('')
   for (const r of reports) {
     if (r.counts.encaminhamento === 0) continue
     lines.push(`• *${r.displayName}:* ${r.counts.encaminhamento} encaminhamento${r.counts.encaminhamento > 1 ? 's' : ''}`)
+  }
+
+  if (totals.automatico > 0) {
+    lines.push('')
+    lines.push(`🤖 *RESPOSTAS AUTOMÁTICAS (férias/ausência/etc.) — ${totals.automatico}*`)
+    lines.push('')
+    for (const r of reports) {
+      if (r.counts.automatico === 0) continue
+      lines.push(`• *${r.displayName}:* ${r.counts.automatico} automática${r.counts.automatico > 1 ? 's' : ''}`)
+    }
   }
 
   if (problems.length > 0) {

@@ -15,31 +15,42 @@ async function main() {
   const reports: AccountReport[] = [
     {
       displayName: 'ULMA', emailAddress: 'ulma@ativa.ai', syncIssue: null,
-      counts: { interessado: 1, encaminhamento: 0, negado: 0, outro: 0 },
+      counts: { interessado: 1, apresentacao: 0, encaminhamento: 0, negado: 0, automatico: 0, outro: 0 },
       interested: [{ email: 'gabriel@emicol.com.br', name: 'Gabriel Gustavo Stocchi Silvest', subject: 'Re: Automação intralogística ULMA', company: 'Emicol', note: 'respondeu sobre automação intralogística' }],
+      presentations: [],
     },
     {
       displayName: 'Curadoria Pet', emailAddress: 'curadoriapet@ativa.ai', syncIssue: null,
-      counts: { interessado: 1, encaminhamento: 0, negado: 0, outro: 0 },
+      counts: { interessado: 1, apresentacao: 0, encaminhamento: 0, negado: 0, automatico: 0, outro: 0 },
       interested: [{ email: 'vanessa@boutiquedopaodelo.com.br', name: 'Vanessa', subject: 'Re: convite reunião', company: 'Boutique do Pão de Ló', note: 'respondeu ao convite de reunião' }],
+      presentations: [],
     },
     {
       displayName: 'Expresso WGP', emailAddress: 'expressowgp@ativa.ai', syncIssue: null,
-      counts: { interessado: 2, encaminhamento: 1, negado: 0, outro: 0 },
+      counts: { interessado: 2, apresentacao: 0, encaminhamento: 1, negado: 0, automatico: 0, outro: 0 },
       interested: [
         { email: 'moyses@pabovi.com.br', name: 'Moyses', subject: 'Re: convite', company: 'Pabovi Mangueiras', note: 'respondeu ao convite de reunião' },
         { email: 'matheus@poligonal.com.br', name: 'Matheus Gomes', subject: 'Re: convite', company: 'Poligonal Engenharia', note: 'respondeu ao convite de reunião' },
       ],
+      presentations: [],
     },
     {
       displayName: 'Superflow', emailAddress: 'superflow@ativa.ai', syncIssue: null,
-      counts: { interessado: 0, encaminhamento: 1, negado: 0, outro: 0 },
+      counts: { interessado: 0, apresentacao: 1, encaminhamento: 1, negado: 0, automatico: 0, outro: 0 },
       interested: [],
+      presentations: [{ email: 'fernanda@empresa.com.br', name: 'Fernanda', subject: 'Re: apresentação', company: '', note: 'pediu portfólio antes de conversar' }],
     },
     {
       displayName: 'Hidrolabor', emailAddress: 'hidrolabor@ativa.ai', syncIssue: 'ETIMEDOUT ao conectar IMAP',
-      counts: { interessado: 0, encaminhamento: 2, negado: 0, outro: 0 },
+      counts: { interessado: 0, apresentacao: 0, encaminhamento: 2, negado: 0, automatico: 0, outro: 0 },
       interested: [],
+      presentations: [],
+    },
+    {
+      displayName: 'Pabovi', emailAddress: 'pabovi@ativa.ai', syncIssue: null,
+      counts: { interessado: 0, apresentacao: 0, encaminhamento: 0, negado: 0, automatico: 3, outro: 0 },
+      interested: [],
+      presentations: [],
     },
   ]
 

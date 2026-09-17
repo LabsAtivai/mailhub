@@ -103,8 +103,9 @@ model Message {
   size           Int?
   createdAt      DateTime       @default(now())
   trashedAt      DateTime?
-  // Triagem automática diária (relatório de interessado/encaminhamento/negado/
-  // outro sobre respostas de cadência) — null até o worker classificar via IA.
+  // Triagem automática diária (relatório de interessado/apresentacao/
+  // encaminhamento/negado/outro sobre respostas de cadência) — null até o
+  // worker classificar via IA.
   leadStatus     String?
   classifiedAt   DateTime?
   folder         Folder         @relation(fields: [folderId], references: [id], onDelete: Cascade)
