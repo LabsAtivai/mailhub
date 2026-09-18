@@ -82,7 +82,7 @@ const isReply = ref(false)
 const isForward = ref(false)
 const attachments = ref<File[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
-const MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024
+const MAX_ATTACHMENTS_BYTES = 40 * 1024 * 1024
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
@@ -179,7 +179,7 @@ async function send() {
   if (!form.accountId) { error.value = 'Selecione uma conta'; return }
   if (!form.to.trim()) { error.value = 'Destinatário obrigatório'; return }
   const totalBytes = attachments.value.reduce((sum, f) => sum + f.size, 0)
-  if (totalBytes > MAX_ATTACHMENTS_BYTES) { error.value = 'Anexos excedem o limite de 20MB'; return }
+  if (totalBytes > MAX_ATTACHMENTS_BYTES) { error.value = 'Anexos excedem o limite de 40MB'; return }
   error.value = ''; sending.value = true
   try {
     const encodedAttachments = await Promise.all(attachments.value.map(async f => ({

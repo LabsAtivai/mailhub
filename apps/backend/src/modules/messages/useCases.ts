@@ -16,7 +16,7 @@ export class SmtpError extends Error {
   constructor(message: string) { super(message); this.name = 'SmtpError' }
 }
 
-const MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024 // 20MB, alinhado ao limite comum de provedores de e-mail
+const MAX_ATTACHMENTS_BYTES = 40 * 1024 * 1024 // 40MB
 
 async function requireOwnedMessage(messageId: string, userId: string) {
   const msg = await repo.findMessageWithOwner(messageId)
@@ -171,7 +171,7 @@ export const messageUseCases = {
     }))
     const totalBytes = attachments.reduce((sum, a) => sum + a.content.length, 0)
     if (totalBytes > MAX_ATTACHMENTS_BYTES) {
-      throw new ValidationError('Anexos excedem o limite de 20MB')
+      throw new ValidationError('Anexos excedem o limite de 40MB')
     }
 
     const isSendGrid = account.outgoingHost === 'smtp.sendgrid.net'
