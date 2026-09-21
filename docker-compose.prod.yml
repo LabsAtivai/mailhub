@@ -56,6 +56,35 @@ services:
     networks:
       - ativaai
 
+  mailhub-minio:
+    image: minio/minio:latest
+    container_name: mailhub-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - mailhub_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ativaai
+
   mailhub-backend:
     image: ghcr.io/labsativai/mailhub-backend:latest
     container_name: mailhub-backend
@@ -64,6 +93,8 @@ services:
       mailhub-postgres:
         condition: service_healthy
       mailhub-redis:
+        condition: service_healthy
+      mailhub-minio:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -76,6 +107,15 @@ services:
       NODE_ENV: ${NODE_ENV}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      MINIO_ENDPOINT: mailhub-minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-mailhub-large-attachments}
+      LARGE_ATTACHMENT_MAX_MB: ${LARGE_ATTACHMENT_MAX_MB:-200}
+      LARGE_ATTACHMENT_EXPIRY_DAYS: ${LARGE_ATTACHMENT_EXPIRY_DAYS:-30}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 30s
@@ -104,6 +144,8 @@ services:
         condition: service_healthy
       mailhub-redis:
         condition: service_healthy
+      mailhub-minio:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
@@ -116,6 +158,12 @@ services:
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       REPORT_EMAIL_FROM: ${REPORT_EMAIL_FROM:-}
       REPORT_EMAIL_TO: ${REPORT_EMAIL_TO:-labs.ativaai@gmail.com}
+      MINIO_ENDPOINT: mailhub-minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-mailhub-large-attachments}
     deploy:
       resources:
         limits:
@@ -151,6 +199,7 @@ services:
 volumes:
   mailhub_postgres:
   mailhub_redis:
+  mailhub_minio:
 
 networks:
   ativaai:

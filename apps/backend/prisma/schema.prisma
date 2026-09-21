@@ -17,6 +17,7 @@ model User {
   accounts     MailAccount[]
   refreshTokens RefreshToken[]
   labels       Label[]
+  largeAttachments LargeAttachment[]
 }
 
 model RefreshToken {
@@ -127,6 +128,26 @@ model Attachment {
   contentId  String?
   isInline   Boolean  @default(false)
   message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+// Anexo grande demais pra ir embutido (base64) num e-mail de saída — fica
+// guardado no MinIO e o e-mail leva só um link de download. Ver
+// [[project_large_attachment_links]] — teto de anexo direto é 20MB porque
+// o SendGrid rejeita mensagem total (headers+anexo em base64) acima de 30MB.
+model LargeAttachment {
+  id               String    @id @default(uuid())
+  userId           String
+  token            String    @unique
+  originalFilename String
+  mimeType         String
+  size             Int
+  storageKey       String
+  downloadCount    Int       @default(0)
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
 
 model Label {

@@ -9,6 +9,7 @@ import { prisma } from './lib/prisma'
 import { logger } from './lib/logger'
 import { AccountSerialQueue } from './lib/serialQueue'
 import { runDailyReport } from './report/dailyReport'
+import { cleanupExpiredLargeAttachments } from './jobs/cleanupLargeAttachments'
 
 logger.info('starting mailhub-worker')
 if (process.env.IMAP_PROXY_URL) {
@@ -470,6 +471,16 @@ setInterval(async () => {
   } catch (err) {
     const errMsg = err instanceof Error ? (err as Error).message : String(err)
     logger.error({ err: errMsg }, 'trash purge scheduler error')
+  }
+}, 6 * 60 * 60 * 1000)
+
+// ── expurgo de links de anexo grande vencidos (MinIO) a cada 6 horas ───────
+setInterval(async () => {
+  try {
+    await cleanupExpiredLargeAttachments()
+  } catch (err) {
+    const errMsg = err instanceof Error ? (err as Error).message : String(err)
+    logger.error({ err: errMsg }, 'large attachments cleanup scheduler error')
   }
 }, 6 * 60 * 60 * 1000)
 

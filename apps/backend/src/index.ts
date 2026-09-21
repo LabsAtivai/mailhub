@@ -18,6 +18,7 @@ import { isPrivateHost } from './lib/ssrf'
 import authRoutes from './modules/auth/routes'
 import accountRoutes from './modules/accounts/routes'
 import folderRoutes from './modules/folders/routes'
+import largeAttachmentRoutes from './modules/largeAttachments/routes'
 import messageRoutes from './modules/messages/routes'
 import labelRoutes from './modules/labels/routes'
 import adminRoutes from './modules/admin/routes'
@@ -68,6 +69,11 @@ app.get('/health', async (_req, res) => {
 app.use('/auth', authRoutes)
 app.use('/accounts', accountRoutes)
 app.use('/accounts', folderRoutes)
+// ANTES de messageRoutes: o router dele aplica requireAuth globalmente (roda
+// pra qualquer path, mesmo sem rota interna batendo) — se largeAttachmentRoutes
+// viesse depois, o download público (destinatário do e-mail, sem JWT) seria
+// barrado com 401 antes de nunca alcançar a rota /large-attachments/:token.
+app.use('/', largeAttachmentRoutes)
 app.use('/', messageRoutes)
 app.use('/labels', labelRoutes)
 app.use('/admin', adminRoutes)

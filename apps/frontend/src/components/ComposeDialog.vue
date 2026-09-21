@@ -33,6 +33,7 @@
       </div>
 
       <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <small v-if="sendingStatus" class="sending-status">{{ sendingStatus }}</small>
     </div>
 
     <template #footer>
@@ -78,6 +79,7 @@ const mail = useMailStore()
 
 const form = reactive({ accountId: '', to: '', cc: '', subject: '', body: '' })
 const sending = ref(false); const error = ref('')
+const sendingStatus = ref('')
 const isReply = ref(false)
 const isForward = ref(false)
 const attachments = ref<File[]>([])
@@ -175,25 +177,49 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+async function uploadLargeAttachment(file: File): Promise<{ token: string; url: string; filename: string; size: number }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await api.post('/large-attachments', formData, { timeout: 5 * 60 * 1000 })
+  return data
+}
+
 async function send() {
   if (!form.accountId) { error.value = 'Selecione uma conta'; return }
   if (!form.to.trim()) { error.value = 'Destinatário obrigatório'; return }
-  const totalBytes = attachments.value.reduce((sum, f) => sum + f.size, 0)
-  if (totalBytes > MAX_ATTACHMENTS_BYTES) { error.value = 'Anexos excedem o limite de 20MB'; return }
-  error.value = ''; sending.value = true
+  error.value = ''; sending.value = true; sendingStatus.value = ''
   try {
-    const encodedAttachments = await Promise.all(attachments.value.map(async f => ({
-      filename: f.name,
-      mimeType: f.type || undefined,
-      content: await fileToBase64(f),
-    })))
+    const totalBytes = attachments.value.reduce((sum, f) => sum + f.size, 0)
+    let bodyText = form.body
+    let encodedAttachments: Array<{ filename: string; mimeType?: string; content: string }> = []
+
+    // Anexo(s) acima do que o SendGrid aceita numa mensagem só (ver
+    // MAX_ATTACHMENTS_BYTES) vira link em vez de bloquear o envio: sobe pro
+    // MinIO (módulo large-attachments do backend) e o link entra no corpo.
+    if (attachments.value.length > 0 && totalBytes > MAX_ATTACHMENTS_BYTES) {
+      const links: string[] = []
+      for (const file of attachments.value) {
+        sendingStatus.value = `Enviando anexo grande: ${file.name}...`
+        const uploaded = await uploadLargeAttachment(file)
+        links.push(`${uploaded.filename} (${formatSize(uploaded.size)}): ${uploaded.url}`)
+      }
+      sendingStatus.value = ''
+      bodyText += `\n\n— Anexo${links.length > 1 ? 's' : ''} grande${links.length > 1 ? 's' : ''} (link válido por 30 dias) —\n${links.join('\n')}`
+    } else {
+      encodedAttachments = await Promise.all(attachments.value.map(async f => ({
+        filename: f.name,
+        mimeType: f.type || undefined,
+        content: await fileToBase64(f),
+      })))
+    }
+
     await api.post('/messages/send', {
       accountId: form.accountId,
       to: form.to.split(',').map(s => s.trim()).filter(Boolean),
       cc: form.cc ? form.cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       subject: form.subject,
-      html: escapeHtml(form.body).replace(/\n/g, '<br>'),
-      text: form.body,
+      html: escapeHtml(bodyText).replace(/\n/g, '<br>'),
+      text: bodyText,
       inReplyTo: props.replyTo?.messageId ?? props.forwardMsg?.messageId,
       attachments: encodedAttachments.length > 0 ? encodedAttachments : undefined,
     })
@@ -203,7 +229,7 @@ async function send() {
     attachments.value = []
   } catch (e: unknown) {
     error.value = extractError(e, 'Erro ao enviar')
-  } finally { sending.value = false }
+  } finally { sending.value = false; sendingStatus.value = '' }
 }
 </script>
 
@@ -222,4 +248,5 @@ async function send() {
 .attach-size { color: var(--p-text-muted-color); white-space: nowrap; font-size: .7rem; }
 .remove-attach { cursor: pointer; font-size: .7rem; color: var(--p-text-muted-color); }
 .remove-attach:hover { color: var(--p-red-500); }
+.sending-status { display: block; margin-top: .4rem; color: var(--p-text-muted-color); font-size: .78rem; }
 </style>
