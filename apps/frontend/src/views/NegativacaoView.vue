@@ -14,13 +14,15 @@
       <section class="neg-card">
         <h2>Negativar e-mail ou domínio</h2>
         <p class="hint">
-          O valor é enviado para a Lista de e-mails a não enviar de todas as contas Snov.io ativas.
-          Use para pedidos de remoção: o contato não receberá mais nenhuma cadência.
+          O valor entra na Lista de e-mails a não enviar só da conta Snov.io dona da caixa escolhida
+          (achada pelo domínio da caixa). Use para pedidos de remoção.
         </p>
         <form class="neg-form" @submit.prevent="submit">
+          <Select v-model="accountId" :options="accounts" optionValue="id" optionLabel="emailAddress"
+            placeholder="Caixa dona" class="neg-select" :disabled="submitting" />
           <InputText v-model="value" placeholder="email@dominio.com ou dominio.com" class="neg-input" :disabled="submitting" />
           <Button type="submit" label="Negativar em todas as contas" icon="pi pi-ban" severity="danger"
-            :loading="submitting" :disabled="!value.trim()" />
+            :loading="submitting" :disabled="!value.trim() || !accountId" />
         </form>
       </section>
 
@@ -70,6 +72,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 import { useToast } from 'primevue/usetoast'
 import { useRouter } from 'vue-router'
 import { api } from '../services/api'
@@ -83,6 +86,8 @@ interface RunDetail extends Run {
 const router = useRouter()
 const toast = useToast()
 const value = ref('')
+const accountId = ref<string | null>(null)
+const accounts = ref<{ id: string; emailAddress: string }[]>([])
 const submitting = ref(false)
 const runs = ref<Run[]>([])
 const openId = ref<number | null>(null)
@@ -110,7 +115,7 @@ async function toggle(id: number) {
 async function submit() {
   submitting.value = true
   try {
-    await api.post('/negativacao/runs', { value: value.value })
+    await api.post('/negativacao/runs', { value: value.value, accountId: accountId.value })
     toast.add({ severity: 'success', summary: 'Negativação iniciada', detail: value.value.trim(), life: 4000 })
     value.value = ''
     setTimeout(loadRuns, 1500)
@@ -130,7 +135,14 @@ function formatDate(s: string) {
   return new Date(s.replace(' ', 'T') + 'Z').toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 }
 
-onMounted(() => { loadRuns(); timer = setInterval(loadRuns, 10000) })
+async function loadAccounts() {
+  try {
+    accounts.value = (await api.get('/accounts')).data
+    if (accounts.value.length === 1) accountId.value = accounts.value[0].id
+  } catch { /* select fica vazio */ }
+}
+
+onMounted(() => { loadAccounts(); loadRuns(); timer = setInterval(loadRuns, 10000) })
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -151,6 +163,7 @@ onUnmounted(() => clearInterval(timer))
 .hint { font-size: .8rem; color: #888; margin: 0 0 .9rem; }
 .neg-form { display: flex; gap: .6rem; flex-wrap: wrap; }
 .neg-input { flex: 1; min-width: 240px; }
+.neg-select { min-width: 240px; }
 .empty { font-size: .85rem; color: #888; padding: .5rem 0; }
 .data-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .data-table th { text-align: left; color: #888; font-weight: 500; font-size: .75rem; text-transform: uppercase; padding: .4rem .5rem; }

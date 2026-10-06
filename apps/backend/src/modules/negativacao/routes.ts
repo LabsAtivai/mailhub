@@ -2,6 +2,7 @@ import { Router, Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
+import { prisma } from '../../lib/prisma'
 import { scope } from '../../lib/logger'
 
 const log = scope('negativacao')
@@ -25,7 +26,10 @@ const triggerLimiter = rateLimit({
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const DOMAIN_RE = /^(?=.{3,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 
-const TriggerSchema = z.object({ value: z.string().trim().toLowerCase().min(3).max(254) })
+const TriggerSchema = z.object({
+  value: z.string().trim().toLowerCase().min(3).max(254),
+  accountId: z.string().uuid(),
+})
 
 function panelUrl(): string | null {
   const url = process.env.NEGATIVACAO_API_URL
@@ -55,10 +59,13 @@ function send(res: Response, out: { status: number; body: unknown }) {
   res.status(out.status).json(out.body)
 }
 
-// POST /negativacao/runs — { value: "email@x.com" | "dominio.com" | "@dominio.com" }
+// POST /negativacao/runs — { value: "email@x.com" | "dominio.com" | "@dominio.com", accountId }
+// A negativação vale só para a conta Snov.io dona da caixa (accountId). O painel acha a
+// dona pelo e-mail igual ao da caixa ou pelo trecho do domínio da caixa (ex.: mktxpto)
+// em qualquer campo da conta, sempre dentro da lista de contas permitidas.
 router.post('/runs', triggerLimiter, async (req: AuthRequest, res: Response) => {
   const parsed = TriggerSchema.safeParse(req.body)
-  if (!parsed.success) { res.status(400).json({ error: 'Informe um e-mail ou domínio' }); return }
+  if (!parsed.success) { res.status(400).json({ error: 'Informe o e-mail/domínio e a caixa' }); return }
 
   const value = parsed.data.value.replace(/^@/, '')
   if (!EMAIL_RE.test(value) && !DOMAIN_RE.test(value)) {
@@ -66,11 +73,19 @@ router.post('/runs', triggerLimiter, async (req: AuthRequest, res: Response) => 
     return
   }
 
-  log.info({ userId: req.userId, userEmail: req.userEmail, value }, 'negativação solicitada')
+  // Ownership: a caixa precisa ser do usuário logado.
+  const mailbox = await prisma.mailAccount.findFirst({
+    where: { id: parsed.data.accountId, userId: req.userId! },
+    select: { emailAddress: true },
+  })
+  if (!mailbox) { res.status(404).json({ error: 'Caixa não encontrada' }); return }
+  const mailboxEmail = mailbox.emailAddress.trim().toLowerCase()
+
+  log.info({ userId: req.userId, userEmail: req.userEmail, value, mailboxEmail }, 'negativação solicitada')
   send(res, await callPanel('/api/manual/runs/trigger', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ value, mailbox: mailboxEmail }),
   }))
 })
 
