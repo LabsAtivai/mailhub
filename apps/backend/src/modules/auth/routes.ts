@@ -1,12 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import argon2 from 'argon2'
 import { z } from 'zod'
-import rateLimit from 'express-rate-limit'
 import { prisma } from '../../lib/prisma'
 import { signAccess, signRefresh, verifyRefresh, hashRefreshToken } from '../../lib/jwt'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
 import { v4 as uuid } from 'uuid'
 import { scope } from '../../lib/logger'
+import { loginEmailLimiter, loginIpLimiter, refreshLimiter, registerLimiter } from './limiters'
 
 const log = scope('auth')
 const router = Router()
@@ -14,14 +14,6 @@ const router = Router()
 function wrap(fn: (req: AuthRequest, res: Response) => Promise<void>) {
   return (req: AuthRequest, res: Response, next: NextFunction) => fn(req, res).catch(next)
 }
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Muitas tentativas, tente novamente em 15 minutos' },
-})
 
 const RegisterSchema = z.object({
   name: z.string().min(2),
@@ -34,7 +26,7 @@ const LoginSchema = z.object({
   password: z.string(),
 })
 
-router.post('/register', authLimiter, wrap(async (req: Request, res: Response) => {
+router.post('/register', registerLimiter, wrap(async (req: Request, res: Response) => {
   const parsed = RegisterSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
 
@@ -60,7 +52,7 @@ router.post('/register', authLimiter, wrap(async (req: Request, res: Response) =
   res.status(201).json({ access, refresh, user: { id: user.id, name: user.name, email: user.email, role: 'user' } })
 }))
 
-router.post('/login', authLimiter, wrap(async (req: Request, res: Response) => {
+router.post('/login', loginIpLimiter, loginEmailLimiter, wrap(async (req: Request, res: Response) => {
   const parsed = LoginSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
 
@@ -81,7 +73,7 @@ router.post('/login', authLimiter, wrap(async (req: Request, res: Response) => {
   res.json({ access, refresh, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
 }))
 
-router.post('/refresh', authLimiter, wrap(async (req: Request, res: Response) => {
+router.post('/refresh', refreshLimiter, wrap(async (req: Request, res: Response) => {
   const { refresh } = req.body
   if (!refresh) { res.status(400).json({ error: 'refresh token required' }); return }
 
