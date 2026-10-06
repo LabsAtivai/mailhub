@@ -17,7 +17,7 @@ function wrap(fn: (req: AuthRequest, res: Response) => Promise<void>) {
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Muitas tentativas, tente novamente em 15 minutos' },

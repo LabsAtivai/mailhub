@@ -15,8 +15,8 @@ export default defineConfig({
       // Router), só "/admin/..." é API — a barra final evita a rota da tela
       // cair no proxy e devolver o 401 da API em vez do index.html.
       '^/admin/': 'http://localhost:3001',
-      // trailing slash: "/negativacao" sozinho é a tela do SPA, só "/negativacao/..." é API.
-      '^/negativacao/': 'http://localhost:3001',
+      // trailing slash: "/negativacao" sozinho é a tela do SPA, só "/negativacao/runs..." é API.
+      '^/negativacao/runs': 'http://localhost:3001',
       '/accounts': 'http://localhost:3001',
       '/folders': 'http://localhost:3001',
       '/messages': 'http://localhost:3001',
