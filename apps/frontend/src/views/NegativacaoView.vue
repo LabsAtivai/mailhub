@@ -110,7 +110,7 @@ async function toggle(id: number) {
 async function submit() {
   submitting.value = true
   try {
-    await api.post('/negativacao', { value: value.value })
+    await api.post('/negativacao/runs', { value: value.value })
     toast.add({ severity: 'success', summary: 'Negativação iniciada', detail: value.value.trim(), life: 4000 })
     value.value = ''
     setTimeout(loadRuns, 1500)

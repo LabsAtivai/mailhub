@@ -55,8 +55,8 @@ function send(res: Response, out: { status: number; body: unknown }) {
   res.status(out.status).json(out.body)
 }
 
-// POST /negativacao — { value: "email@x.com" | "dominio.com" | "@dominio.com" }
-router.post('/', triggerLimiter, async (req: AuthRequest, res: Response) => {
+// POST /negativacao/runs — { value: "email@x.com" | "dominio.com" | "@dominio.com" }
+router.post('/runs', triggerLimiter, async (req: AuthRequest, res: Response) => {
   const parsed = TriggerSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: 'Informe um e-mail ou domínio' }); return }
 

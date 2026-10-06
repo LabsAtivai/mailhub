@@ -88,7 +88,7 @@ interface ClientProfile {
 }
 
 const props = defineProps<{ visible: boolean; accountId: string | null }>()
-const emit = defineEmits(['update:visible'])
+defineEmits(['update:visible'])
 const confirm = useConfirm()
 
 const profiles = ref<ClientProfile[]>([])
