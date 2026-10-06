@@ -20,8 +20,12 @@
 
       <div class="field">
         <input type="file" ref="fileInputRef" multiple style="display:none" @change="onFilesSelected" />
-        <Button label="Anexar arquivo" icon="pi pi-paperclip" text size="small"
-          style="align-self:flex-start" @click="fileInputRef?.click()" />
+        <div style="display:flex; gap:.5rem;">
+          <Button label="Anexar arquivo" icon="pi pi-paperclip" text size="small"
+            style="align-self:flex-start" @click="fileInputRef?.click()" />
+          <Button v-if="isReply && props.replyTo?.id" label="Gerar resposta com IA" icon="pi pi-bolt" text size="small"
+            style="align-self:flex-start" :loading="generatingAi" @click="generateAiReply" />
+        </div>
         <div v-if="attachments.length > 0" class="attach-list">
           <div v-for="(att, idx) in attachments" :key="idx" class="attach-chip">
             <i class="pi pi-file"></i>
@@ -56,6 +60,7 @@ import { extractError } from '../services/errorMessage'
 import { useMailStore } from '../stores/mail'
 
 interface ComposeMessage {
+  id?: string
   accountId?: string
   fromEmail?: string | null
   subject?: string | null
@@ -82,6 +87,8 @@ const sending = ref(false); const error = ref('')
 const sendingStatus = ref('')
 const isReply = ref(false)
 const isForward = ref(false)
+const quoteBlock = ref('')
+const generatingAi = ref(false)
 const attachments = ref<File[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024
@@ -158,7 +165,8 @@ watch(() => [props.replyTo, props.replyAll] as const, ([msg]) => {
   }
 
   form.subject = msg.subject?.startsWith('Re:') ? msg.subject : `Re: ${msg.subject || ''}`
-  form.body = `\n\n--- Em ${new Date(msg.date).toLocaleString('pt-BR')}, ${msg.fromEmail} escreveu:\n${msg.textBody || ''}`
+  quoteBlock.value = `\n\n--- Em ${new Date(msg.date).toLocaleString('pt-BR')}, ${msg.fromEmail} escreveu:\n${msg.textBody || ''}`
+  form.body = quoteBlock.value
 })
 
 watch(() => props.forwardMsg, (msg) => {
@@ -172,6 +180,20 @@ watch(() => props.forwardMsg, (msg) => {
   form.subject = msg.subject?.startsWith('Fwd:') ? msg.subject : `Fwd: ${msg.subject || ''}`
   form.body = `\n\n---------- Mensagem encaminhada ----------\nDe: ${msg.fromEmail || ''}\nData: ${new Date(msg.date).toLocaleString('pt-BR')}\nAssunto: ${msg.subject || ''}\n\n${msg.textBody || ''}`
 })
+
+async function generateAiReply() {
+  if (!props.replyTo?.id) return
+  error.value = ''
+  generatingAi.value = true
+  try {
+    const { data } = await api.post(`/messages/${props.replyTo.id}/ai-reply`, {})
+    form.body = `${data.response}\n${quoteBlock.value}`
+  } catch (e: unknown) {
+    error.value = extractError(e, 'Erro ao gerar resposta com IA')
+  } finally {
+    generatingAi.value = false
+  }
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')

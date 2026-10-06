@@ -7,6 +7,7 @@ const router = createRouter({
     { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
     { path: '/register', component: () => import('../views/RegisterView.vue'), meta: { public: true } },
     { path: '/admin', component: () => import('../views/AdminView.vue'), meta: { adminOnly: true } },
+    { path: '/negativacao', component: () => import('../views/NegativacaoView.vue') },
     { path: '/', component: () => import('../views/MailView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ]

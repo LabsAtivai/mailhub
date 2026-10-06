@@ -104,7 +104,9 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: ${PORT}
       NODE_ENV: ${NODE_ENV}
+      TZ: America/Sao_Paulo
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      NEGATIVACAO_API_URL: ${NEGATIVACAO_API_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       MINIO_ENDPOINT: mailhub-minio
       MINIO_PORT: 9000
@@ -154,6 +156,7 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      TZ: America/Sao_Paulo
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       REPORT_EMAIL_FROM: ${REPORT_EMAIL_FROM:-}
       REPORT_EMAIL_TO: ${REPORT_EMAIL_TO:-labs.ativaai@gmail.com}

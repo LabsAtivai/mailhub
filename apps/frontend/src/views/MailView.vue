@@ -37,6 +37,9 @@
           <span class="account-email" :title="acc.displayName || acc.emailAddress">{{ acc.displayName || acc.emailAddress }}</span>
           <span v-if="acc.syncState === 'SYNCING'" class="sync-badge">↻</span>
           <span v-else-if="acc.syncState === 'ERROR'" class="err-badge" :title="acc.lastError ?? ''">!</span>
+          <button class="icon-btn" v-tooltip="'Clientes (IA)'" @click.stop="openClientProfiles(acc)">
+            <i class="pi pi-sparkles" style="font-size:.65rem"></i>
+          </button>
           <button class="icon-btn" v-tooltip="'Editar conta'" @click.stop="openEditAccount(acc)">
             <i class="pi pi-cog" style="font-size:.65rem"></i>
           </button>
@@ -87,6 +90,10 @@
 
       <Divider style="margin:.5rem 0" />
       <button class="add-label-btn" @click="showAddAccount = true">+ Conta IMAP</button>
+
+      <button class="add-label-btn admin-btn" @click="router.push('/negativacao')">
+        <i class="pi pi-ban" style="font-size:.8rem"></i> Negativação
+      </button>
 
       <button v-if="auth.isAdmin" class="add-label-btn admin-btn" @click="router.push('/admin')">
         <i class="pi pi-cog" style="font-size:.8rem"></i> Painel Admin
@@ -319,6 +326,7 @@
     <EditAccountDialog v-model:visible="showEditAccount" :account="editingAccount" @saved="mail.fetchAccounts()" />
     <ComposeDialog v-model:visible="showCompose" :reply-to="replyTo" :forward-msg="forwardMsg" :reply-all="replyAllMode" @sent="showCompose = false" />
     <LabelManagerDialog v-model:visible="showLabelManager" @update:visible="onLabelManagerClose" />
+    <ClientProfilesDialog v-model:visible="showClientProfiles" :account-id="clientProfilesAccountId" />
   </div>
 </template>
 
@@ -335,6 +343,7 @@ import AddAccountDialog from '../components/AddAccountDialog.vue'
 import EditAccountDialog from '../components/EditAccountDialog.vue'
 import ComposeDialog from '../components/ComposeDialog.vue'
 import LabelManagerDialog from '../components/LabelManagerDialog.vue'
+import ClientProfilesDialog from '../components/ClientProfilesDialog.vue'
 import LabelPicker from '../components/LabelPicker.vue'
 import { api } from '../services/api'
 import { useRouter } from 'vue-router'
@@ -351,6 +360,8 @@ const showEditAccount = ref(false)
 const editingAccount = ref<import('../stores/mail').MailAccount | null>(null)
 const showCompose = ref(false)
 const showLabelManager = ref(false)
+const showClientProfiles = ref(false)
+const clientProfilesAccountId = ref<string | null>(null)
 const replyTo = ref<MessageDetail | null>(null)
 const forwardMsg = ref<MessageDetail | null>(null)
 const replyAllMode = ref(false)
@@ -540,6 +551,11 @@ const senderInitial = computed(() => {
 function openEditAccount(acc: import('../stores/mail').MailAccount) {
   editingAccount.value = acc
   showEditAccount.value = true
+}
+
+function openClientProfiles(acc: import('../stores/mail').MailAccount) {
+  clientProfilesAccountId.value = acc.id
+  showClientProfiles.value = true
 }
 
 function toggleAccount(id: string) {

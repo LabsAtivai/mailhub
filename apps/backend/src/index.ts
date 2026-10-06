@@ -18,10 +18,14 @@ import { isPrivateHost } from './lib/ssrf'
 import authRoutes from './modules/auth/routes'
 import accountRoutes from './modules/accounts/routes'
 import folderRoutes from './modules/folders/routes'
-import largeAttachmentRoutes from './modules/largeAttachments/routes'
 import messageRoutes from './modules/messages/routes'
 import labelRoutes from './modules/labels/routes'
 import adminRoutes from './modules/admin/routes'
+import aiRoutes from './modules/ai/routes'
+import clientRoutes from './modules/clients/routes'
+import negativacaoRoutes from './modules/negativacao/routes'
+import largeAttachmentRoutes from './modules/largeAttachments/routes'
+import { aiUseCases } from './modules/ai/useCases'
 
 const app = express()
 app.set('trust proxy', 1)
@@ -75,7 +79,10 @@ app.use('/accounts', folderRoutes)
 // barrado com 401 antes de nunca alcançar a rota /large-attachments/:token.
 app.use('/', largeAttachmentRoutes)
 app.use('/', messageRoutes)
+app.use('/', aiRoutes)
+app.use('/', clientRoutes)
 app.use('/labels', labelRoutes)
+app.use('/negativacao', negativacaoRoutes)
 app.use('/admin', adminRoutes)
 
 if (sentryEnabled) Sentry.setupExpressErrorHandler(app)
@@ -145,6 +152,9 @@ redisSub.on('message', (channel: string, message: string) => {
     if (channel === 'mail:bodyReady' && payload.messageId) {
       forwardIfEnabled(payload.accountId, payload.messageId).catch(err =>
         logger.error({ err, accountId: payload.accountId, messageId: payload.messageId }, 'auto-forward error')
+      )
+      aiUseCases.indexMessageIfSent(payload.messageId).catch(err =>
+        logger.error({ err, accountId: payload.accountId, messageId: payload.messageId }, 'ai auto-index error')
       )
     }
   } catch (err) {
