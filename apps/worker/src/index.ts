@@ -523,6 +523,12 @@ setInterval(async () => {
 // uma vez, e a sobrecarga gerou uma cascata de ETIMEDOUT/"cannot open
 // folder". Só as contas ativas nas últimas horas precisam de resync+IDLE na
 // hora; o resto pega o próximo ciclo periódico normalmente.
+// Worker único: se o processo anterior morreu (OOM/deploy) no meio do
+// relatório manual, o lock ficaria órfão até o TTL de 5min e o próximo clique
+// em "Rodar agora" seria ignorado em silêncio.
+redis.del('mailhub:report:running').catch(err =>
+  logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'falha ao limpar lock órfão do relatório'))
+
 prisma.mailAccount.updateMany({
   where: { syncState: 'SYNCING' },
   data: { syncState: 'IDLE' },
