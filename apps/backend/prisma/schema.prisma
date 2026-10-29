@@ -223,3 +223,20 @@ model AutoReplyLog {
   @@index([accountId, createdAt])
   @@index([accountId, fromEmail, threadKey, createdAt])
 }
+
+// Base de conhecimento do respondedor automático (modules/autoReply/knowledge.ts).
+// Declarada aqui só para o `prisma db push` do boot reconhecer a tabela: antes ela
+// existia apenas via SQL e o push tentava apagá-la, derrubando o backend. Colunas e
+// índice espelham o CREATE TABLE de knowledge.ts; o acesso continua por SQL (pgvector).
+model ClientKnowledgeChunk {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId  String
+  source     String
+  chunkIndex Int
+  content    String
+  embedding  Unsupported("vector(1536)")
+  model      String
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([accountId, source], map: "ClientKnowledgeChunk_account_idx")
+}
