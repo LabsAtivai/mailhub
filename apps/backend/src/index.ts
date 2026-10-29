@@ -21,6 +21,8 @@ import folderRoutes from './modules/folders/routes'
 import messageRoutes from './modules/messages/routes'
 import labelRoutes from './modules/labels/routes'
 import adminRoutes from './modules/admin/routes'
+import autoReplyRoutes from './modules/autoReply/routes'
+import { onNewMessage as autoReplyOnNew, onBodyReady as autoReplyOnBody } from './modules/autoReply/agent'
 import aiRoutes from './modules/ai/routes'
 import clientRoutes from './modules/clients/routes'
 import negativacaoRoutes from './modules/negativacao/routes'
@@ -83,6 +85,7 @@ app.use('/', aiRoutes)
 app.use('/', clientRoutes)
 app.use('/labels', labelRoutes)
 app.use('/negativacao', negativacaoRoutes)
+app.use('/', autoReplyRoutes)
 app.use('/admin', adminRoutes)
 
 if (sentryEnabled) Sentry.setupExpressErrorHandler(app)
@@ -149,7 +152,16 @@ redisSub.on('message', (channel: string, message: string) => {
     }
     io.to(`account:${payload.accountId}`).emit(channel, payload)
 
+    if (channel === 'mail:new' && payload.messageId) {
+      autoReplyOnNew(payload).catch(err =>
+        logger.error({ err, accountId: payload.accountId, messageId: payload.messageId }, 'auto-reply new error')
+      )
+    }
+
     if (channel === 'mail:bodyReady' && payload.messageId) {
+      autoReplyOnBody(payload.accountId, payload.messageId).catch(err =>
+        logger.error({ err, accountId: payload.accountId, messageId: payload.messageId }, 'auto-reply body error')
+      )
       forwardIfEnabled(payload.accountId, payload.messageId).catch(err =>
         logger.error({ err, accountId: payload.accountId, messageId: payload.messageId }, 'auto-forward error')
       )

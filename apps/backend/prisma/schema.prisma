@@ -59,6 +59,8 @@ model MailAccount {
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   folders           Folder[]
   clientProfiles    ClientProfile[]
+  autoReplyConfig   AutoReplyConfig?
+  autoReplyLogs     AutoReplyLog[]
 }
 
 model Folder {
@@ -186,4 +188,38 @@ model ClientProfile {
   account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@unique([accountId, domain])
+}
+
+// Respondedor automático por caixa. `mode`: off | shadow (só gera rascunho no
+// log) | test (envia, mas sempre pra testRecipient) | live (envia ao remetente).
+// A base de conhecimento (ClientKnowledgeChunk, pgvector) é criada via SQL em
+// modules/autoReply/knowledge.ts — mesmo esquema do MessageEmbedding.
+model AutoReplyConfig {
+  accountId     String      @id
+  mode          String      @default("off")
+  testRecipient String?
+  clientName    String      @default("")
+  signature     String      @default("")
+  dailyLimit    Int         @default(50)
+  updatedAt     DateTime    @updatedAt
+  account       MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+// Um registro por mensagem recebida processada: o unique em messageId é o
+// que impede resposta dupla (claim antes de gerar).
+model AutoReplyLog {
+  id         String      @id @default(uuid())
+  accountId  String
+  messageId  String      @unique
+  fromEmail  String
+  threadKey  String
+  status     String
+  reason     String?
+  draft      String?
+  sentTo     String?
+  createdAt  DateTime    @default(now())
+  account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@index([accountId, fromEmail, threadKey, createdAt])
 }

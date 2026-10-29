@@ -95,6 +95,10 @@
         <i class="pi pi-ban" style="font-size:.8rem"></i> Negativação
       </button>
 
+      <button class="add-label-btn admin-btn" @click="router.push('/metricas')">
+        <i class="pi pi-android" style="font-size:.8rem"></i> Métricas
+      </button>
+
       <button v-if="auth.isAdmin" class="add-label-btn admin-btn" @click="router.push('/admin')">
         <i class="pi pi-cog" style="font-size:.8rem"></i> Painel Admin
       </button>
