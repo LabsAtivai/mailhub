@@ -148,11 +148,12 @@ ${input.body || '[sem corpo]'}
 
 // Chamada genérica com instruções próprias (usada pelo respondedor automático,
 // que tem prompt separado do botão "Gerar resposta").
-export async function generateWithInstructions(instructions: string, input: string, maxOutputTokens = 700): Promise<string> {
+export async function generateWithInstructions(instructions: string, input: string, maxOutputTokens?: number): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey()}` },
-    body: JSON.stringify({ model: CHAT_MODEL, instructions, input, max_output_tokens: maxOutputTokens }),
+    // Sem max_output_tokens por padrão: a resposta do agente não tem teto de tamanho.
+    body: JSON.stringify({ model: CHAT_MODEL, instructions, input, ...(maxOutputTokens ? { max_output_tokens: maxOutputTokens } : {}) }),
   })
   const raw = await res.text()
   let data: any = null
