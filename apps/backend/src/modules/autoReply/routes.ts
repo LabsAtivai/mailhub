@@ -7,6 +7,7 @@ import { OpenAiError } from '../ai/openaiClient'
 import { getAutoReplyMetrics } from './metrics'
 import { ingestDocument, knowledgeStats } from './knowledge'
 import { checkReadiness } from './readiness'
+import { listAssets, upsertAsset } from './assets'
 
 const log = scope('autoReply')
 const router = Router()
@@ -23,6 +24,14 @@ const ConfigSchema = z.object({
 const DocumentSchema = z.object({
   source: z.string().min(1).max(200),
   text: z.string().min(1).max(500_000),
+})
+
+const AssetSchema = z.object({
+  kind: z.string().min(1).max(40).regex(/^[a-z0-9_-]+$/),
+  filename: z.string().min(1).max(200),
+  mimeType: z.string().min(1).max(100).default('application/pdf'),
+  contentBase64: z.string().min(1),
+  driveFileId: z.string().max(200).nullable().optional(),
 })
 
 function fail(res: Response, err: unknown) {
@@ -90,6 +99,24 @@ router.post('/admin/auto-reply/:accountId/knowledge', requireAdmin, async (req: 
 
 router.get('/admin/auto-reply/:accountId/knowledge', requireAdmin, async (req: AuthRequest, res: Response) => {
   try { res.json(await knowledgeStats(req.params.accountId)) } catch (err) { fail(res, err) }
+})
+
+// POST /admin/auto-reply/:accountId/assets — arquivo que o agente pode anexar (kind "presentation").
+router.post('/admin/auto-reply/:accountId/assets', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const parsed = AssetSchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  try {
+    const account = await prisma.mailAccount.findUnique({ where: { id: req.params.accountId }, select: { id: true } })
+    if (!account) { res.status(404).json({ error: 'Conta não encontrada' }); return }
+    res.json(await upsertAsset(account.id, parsed.data))
+  } catch (err) {
+    if (err instanceof Error && /Arquivo/.test(err.message)) { res.status(400).json({ error: err.message }); return }
+    fail(res, err)
+  }
+})
+
+router.get('/admin/auto-reply/:accountId/assets', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try { res.json(await listAssets(req.params.accountId)) } catch (err) { fail(res, err) }
 })
 
 export default router

@@ -13,11 +13,12 @@ export interface AutoReplyMetrics {
     errors: number
     skippedByReason: Record<string, number>
   }
+  withAttachment: number // respostas que levaram a apresentação em anexo
   interested: number     // leads respondidos pelo agente classificados como "interessado"
   replied: number        // leads respondidos pelo agente que escreveram de novo depois
   replyRate: number      // replied / replies (0 a 1)
   leadStatus: Record<string, number>  // métricas de triagem já existentes (INBOX do período)
-  recent: Array<{ id: string; at: string; fromEmail: string; status: string; reason: string | null; draft: string | null }>
+  recent: Array<{ id: string; at: string; fromEmail: string; status: string; reason: string | null; draft: string | null; attachment: string | null }>
 }
 
 export async function getAutoReplyMetrics(accountId: string, days: number): Promise<AutoReplyMetrics> {
@@ -58,13 +59,16 @@ export async function getAutoReplyMetrics(accountId: string, days: number): Prom
     prisma.autoReplyLog.findMany({
       where: { accountId, status: { not: 'processing' } },
       orderBy: { createdAt: 'desc' }, take: 20,
-      select: { id: true, createdAt: true, fromEmail: true, status: true, reason: true, draft: true },
+      select: { id: true, createdAt: true, fromEmail: true, status: true, reason: true, draft: true, attachment: true },
     }),
   ])
 
   const count = (s: string) => grouped.find(g => g.status === s)?._count._all ?? 0
   const replies = SENT_STATUSES.reduce((acc, s) => acc + count(s), 0)
   const replied = Number(repliedRows[0]?.n ?? 0)
+  const withAttachment = await prisma.autoReplyLog.count({
+    where: { accountId, createdAt: { gte: since }, attachment: { not: null }, status: { in: SENT_STATUSES } },
+  })
 
   const leadStatus: Record<string, number> = Object.fromEntries(LEAD_STATUSES.map(s => [s, 0]))
   for (const r of leadRows) if (r.leadStatus) leadStatus[r.leadStatus] = r._count._all
@@ -79,13 +83,14 @@ export async function getAutoReplyMetrics(accountId: string, days: number): Prom
       errors: count('error'),
       skippedByReason: Object.fromEntries(skippedRows.map(r => [r.reason ?? 'outro', r._count._all])),
     },
+    withAttachment,
     interested: Number(interestedRows[0]?.n ?? 0),
     replied,
     replyRate: replies ? replied / replies : 0,
     leadStatus,
     recent: recent.map(r => ({
       id: r.id, at: r.createdAt.toISOString(), fromEmail: r.fromEmail,
-      status: r.status, reason: r.reason, draft: r.draft?.slice(0, 600) ?? null,
+      status: r.status, reason: r.reason, draft: r.draft?.slice(0, 600) ?? null, attachment: r.attachment,
     })),
   }
 }

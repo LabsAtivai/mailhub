@@ -64,6 +64,11 @@
             <div class="stat-sub">{{ pct(data.replied, data.agent.replies) }} das respondidas</div>
           </div>
           <div class="stat">
+            <div class="stat-label">Com apresentação</div>
+            <div class="stat-value">{{ data.withAttachment }}</div>
+            <div class="stat-sub">{{ pct(data.withAttachment, data.agent.replies) }} das respondidas</div>
+          </div>
+          <div class="stat">
             <div class="stat-label">Rascunhos (sombra)</div>
             <div class="stat-value">{{ data.agent.shadow }}</div>
             <div class="stat-sub">gerados sem envio</div>
@@ -101,7 +106,10 @@
                 <tr class="clickable" @click="openId = openId === r.id ? null : r.id">
                   <td>{{ formatDate(r.at) }}</td>
                   <td>{{ r.fromEmail }}</td>
-                  <td><span class="badge" :class="r.status">{{ statusLabel(r) }}</span></td>
+                  <td>
+                    <span class="badge" :class="r.status">{{ statusLabel(r) }}</span>
+                    <span v-if="r.attachment" class="badge attach" :title="r.attachment"><i class="pi pi-paperclip"></i> PDF</span>
+                  </td>
                 </tr>
                 <tr v-if="openId === r.id && r.draft" class="detail-row">
                   <td colspan="3"><pre class="draft">{{ r.draft }}</pre></td>
@@ -123,7 +131,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../services/api'
 import { extractError } from '../services/errorMessage'
 
-interface Recent { id: string; at: string; fromEmail: string; status: string; reason: string | null; draft: string | null }
+interface Recent { id: string; at: string; fromEmail: string; status: string; reason: string | null; draft: string | null; attachment: string | null }
 interface Finding { code: string; message: string }
 interface Readiness {
   ok: boolean
@@ -134,6 +142,7 @@ interface Readiness {
 interface Metrics {
   mode: string
   agent: { replies: number; shadow: number; skipped: number; errors: number; skippedByReason: Record<string, number> }
+  withAttachment: number
   interested: number
   replied: number
   replyRate: number
@@ -269,6 +278,7 @@ onUnmounted(() => clearInterval(timer))
 .badge { padding: .15rem .5rem; border-radius: 999px; font-size: .72rem; font-weight: 600; background: #eee; color: #555; }
 .badge.sent, .badge.test_sent { background: #e6f4ea; color: #1e7e34; }
 .badge.shadow { background: #e8f0fe; color: #1a56c4; }
+.badge.attach { margin-left: .3rem; background: #fff4e0; color: #b26a00; }
 .badge.error { background: #fdecea; color: #c62828; }
 .error-text { color: #c62828; font-size: .85rem; }
 .ready-line { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }

@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma'
+import { getAssetMeta, PRESENTATION_KIND } from './assets'
 
 // Verificação de prontidão para o modo `live`. Bloqueios impedem ligar o envio
 // ao lead; avisos só pedem revisão humana. Ver docs/autoreply-producao.md.
@@ -66,6 +67,10 @@ export async function checkReadiness(accountId: string): Promise<Readiness> {
     if (s.cnpj) blockers.push({ code: 'cnpj', message: `${source}: contém CNPJ.` })
     if (s.secret) blockers.push({ code: 'secret', message: `${source}: parece conter credencial ou senha.` })
     if (s.generic > 0) warnings.push({ code: 'generic_ativa', message: `${source}: ${s.generic} de ${s.total} trechos parecem do onboarding da Ativa.ai, e não da oferta do cliente.` })
+  }
+
+  if (!(await getAssetMeta(accountId, PRESENTATION_KIND))) {
+    warnings.push({ code: 'no_presentation', message: 'Sem PDF de apresentação cadastrado: o agente não consegue anexar material.' })
   }
 
   const grouped = await prisma.autoReplyLog.groupBy({ by: ['status'], where: { accountId }, _count: { _all: true } })

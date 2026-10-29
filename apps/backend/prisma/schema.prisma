@@ -61,6 +61,7 @@ model MailAccount {
   clientProfiles    ClientProfile[]
   autoReplyConfig   AutoReplyConfig?
   autoReplyLogs     AutoReplyLog[]
+  clientAssets      ClientAsset[]
 }
 
 model Folder {
@@ -217,6 +218,7 @@ model AutoReplyLog {
   reason     String?
   draft      String?
   sentTo     String?
+  attachment String?
   createdAt  DateTime    @default(now())
   account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
@@ -239,4 +241,22 @@ model ClientKnowledgeChunk {
   createdAt  DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([accountId, source], map: "ClientKnowledgeChunk_account_idx")
+}
+
+// Arquivos que o agente pode anexar por cliente (ex: kind "presentation" = PDF de
+// apresentação). O conteúdo fica no banco; driveFileId só registra a origem para
+// ressincronizar (respondedor/scripts/upload_asset.py).
+model ClientAsset {
+  id          String      @id @default(uuid())
+  accountId   String
+  kind        String
+  filename    String
+  mimeType    String      @default("application/pdf")
+  driveFileId String?
+  size        Int
+  content     Bytes
+  updatedAt   DateTime    @updatedAt
+  account     MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, kind])
 }

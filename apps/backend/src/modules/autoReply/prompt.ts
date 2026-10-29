@@ -11,6 +11,7 @@ import { brasiliaPromptContext } from '../../lib/brazilCalendar'
 //  - o e-mail recebido é tratado como dado, nunca como instrução.
 
 export const NO_REPLY_TOKEN = '[[SEM_RESPOSTA]]'
+export const ATTACH_PRESENTATION_TOKEN = '[[ANEXAR_APRESENTACAO]]'
 
 export const AGENT_SYSTEM_INSTRUCTIONS = `
 Você é o AtivaWriter, assistente executivo comercial da Ativa.ai, respondendo em nome do cliente indicado no CONTEXTO DO CLIENTE.
@@ -83,6 +84,13 @@ HORÁRIOS (REGRA RÍGIDA):
 - Se o destinatário propuser um horário fora do expediente, no almoço, em feriado, fim de semana ou que já passou, não aceite: explique em uma frase curta e peça uma alternativa, ou ofereça um dia útil válido da lista, dentro do expediente.
 - Se o horário proposto estiver dentro do expediente e for um dia útil válido, confirme-o diretamente.
 
+ANEXO DA APRESENTAÇÃO:
+- Só se aplica quando a seção ARQUIVO DISPONÍVEL PARA ANEXO do prompt listar a apresentação. Se ela não existir, nunca diga que está enviando ou anexando arquivo e nunca use o marcador abaixo.
+- É oportunidade de apresentação quando o remetente pede apresentação, material, portfólio, proposta ou mais informações sobre a empresa; demonstra interesse inicial; ou encaminha/indica alguém para conhecer a empresa.
+- Nesses casos, diga de forma natural e curta que a apresentação segue em anexo e escreva, sozinho na última linha da resposta, o marcador ${ATTACH_PRESENTATION_TOKEN} (ele é removido antes do envio).
+- Não anexe em pedido de descadastro, recusa, e-mail automático ou quando o remetente já tiver recebido a apresentação nesta conversa.
+- O CTA continua obrigatório: depois de mencionar o anexo, peça a disponibilidade para uma conversa breve.
+
 PEDIDO DE REMOÇÃO / DESCADASTRO:
 - Se o remetente pedir para ser removido da lista, parar de receber e-mails, descadastrar ou disser que não tem interesse em receber mais contatos, trate como opt-out.
 - Responda em no máximo 2 ou 3 frases curtas: peça desculpas pelo incômodo, confirme que o e-mail foi removido e que não receberá novos contatos.
@@ -97,7 +105,13 @@ FORMATO:
 - Assinatura real ao final quando existir.
 `.trim()
 
-export function buildAgentPrompt(input: { subject: string; body: string; signature: string; clientContext: string }): string {
+// Remove o marcador de anexo da resposta e informa se a apresentação deve ir junto.
+export function extractAttachFlag(text: string): { text: string; attach: boolean } {
+  const attach = text.includes(ATTACH_PRESENTATION_TOKEN)
+  return { text: text.split(ATTACH_PRESENTATION_TOKEN).join('').replace(/\n{3,}/g, '\n\n').trim(), attach }
+}
+
+export function buildAgentPrompt(input: { subject: string; body: string; signature: string; clientContext: string; attachmentName?: string | null }): string {
   return `
 ### DATA E HORA ATUAL (Brasília)
 ${brasiliaPromptContext()}
@@ -111,6 +125,9 @@ ${input.signature || '[não informada]'}
 Informações reais sobre a empresa representada (questionário, kickoff, apresentação, textos de comunicação). Use como fonte de verdade sobre escopo, serviços, dores e acordos já feitos.
 
 ${input.clientContext || '[nenhum contexto de cliente informado]'}
+
+### ARQUIVO DISPONÍVEL PARA ANEXO
+${input.attachmentName ? `Apresentação institucional (PDF): ${input.attachmentName}` : '[nenhum — não mencione anexo]'}
 
 ### E-MAIL RECEBIDO
 Assunto: ${input.subject || '[sem assunto]'}

@@ -2,7 +2,8 @@ import { prisma } from '../../lib/prisma'
 import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
 import { generateWithInstructions } from '../ai/openaiClient'
-import { AGENT_SYSTEM_INSTRUCTIONS, NO_REPLY_TOKEN, buildAgentPrompt } from './prompt'
+import { AGENT_SYSTEM_INSTRUCTIONS, NO_REPLY_TOKEN, buildAgentPrompt, extractAttachFlag } from './prompt'
+import { getAssetAttachment, getAssetMeta, PRESENTATION_KIND } from './assets'
 import { sanitizeEmailBody, cleanupFinalEmail } from './sanitize'
 import { messageUseCases } from '../messages/useCases'
 import { searchKnowledge } from './knowledge'
@@ -69,7 +70,7 @@ export async function onBodyReady(accountId: string, messageId: string) {
   } catch {
     return
   }
-  const finish = async (status: string, extra: { reason?: string; draft?: string; sentTo?: string } = {}) => {
+  const finish = async (status: string, extra: { reason?: string; draft?: string; sentTo?: string; attachment?: string } = {}) => {
     await prisma.autoReplyLog.update({ where: { messageId }, data: { status, ...extra } })
   }
 
@@ -100,13 +101,16 @@ export async function onBodyReady(accountId: string, messageId: string) {
       knowledge.length ? knowledge.join('\n\n---\n\n') : '[base de conhecimento vazia para este cliente]',
     ].filter(Boolean).join('\n')
 
+    const presentation = await getAssetMeta(accountId, PRESENTATION_KIND)
     const raw = await generateWithInstructions(
       AGENT_SYSTEM_INSTRUCTIONS,
-      buildAgentPrompt({ subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext }),
+      buildAgentPrompt({ subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext, attachmentName: presentation?.filename }),
     )
-    const draft = cleanupFinalEmail(raw)
+    const flagged = extractAttachFlag(raw)
+    const draft = cleanupFinalEmail(flagged.text)
+    const attachment = presentation && flagged.attach ? await getAssetAttachment(accountId, PRESENTATION_KIND) : null
     if (draft.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
-    if (cfg.mode === 'shadow') return finish('shadow', { draft })
+    if (cfg.mode === 'shadow') return finish('shadow', { draft, attachment: attachment?.filename })
 
     const live = cfg.mode === 'live'
     const to = live ? fromEmail : cfg.testRecipient
@@ -122,8 +126,9 @@ export async function onBodyReady(accountId: string, messageId: string) {
       text,
       html: `<div style="white-space:pre-wrap">${escapeHtml(text)}</div>`,
       inReplyTo: live ? (msg.messageId ?? undefined) : undefined,
+      attachments: attachment ? [attachment] : undefined,
     })
-    await finish(live ? 'sent' : 'test_sent', { draft, sentTo: to })
+    await finish(live ? 'sent' : 'test_sent', { draft, sentTo: to, attachment: attachment?.filename })
     log.info({ accountId, messageId, mode: cfg.mode }, 'auto reply sent')
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)

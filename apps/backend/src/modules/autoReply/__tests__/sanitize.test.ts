@@ -17,3 +17,19 @@ describe('autoReply sanitize e prompt', () => {
     expect(AGENT_SYSTEM_INSTRUCTIONS).toContain(NO_REPLY_TOKEN)
   })
 })
+
+import { extractAttachFlag, ATTACH_PRESENTATION_TOKEN, buildAgentPrompt } from '../prompt'
+
+describe('anexo da apresentação', () => {
+  it('remove o marcador e sinaliza o anexo', () => {
+    const r = extractAttachFlag(`Segue a apresentação em anexo. Qual sua disponibilidade?\n\n${ATTACH_PRESENTATION_TOKEN}`)
+    expect(r.attach).toBe(true)
+    expect(r.text).not.toContain('[[')
+    expect(extractAttachFlag('Olá, tudo bem?').attach).toBe(false)
+  })
+  it('só lista arquivo no prompt quando existe', () => {
+    const base = { subject: 's', body: 'b', signature: 'x', clientContext: 'c' }
+    expect(buildAgentPrompt({ ...base, attachmentName: 'apresentacao.pdf' })).toContain('apresentacao.pdf')
+    expect(buildAgentPrompt(base)).toContain('não mencione anexo')
+  })
+})
