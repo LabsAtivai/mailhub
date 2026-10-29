@@ -27,6 +27,22 @@
         </p>
       </section>
 
+      <section v-if="readiness" class="met-card">
+        <h2>Prontidão para produção</h2>
+        <p class="hint ready-line">
+          <span class="ready-badge" :class="readiness.ok ? 'ok' : 'blocked'">
+            {{ readiness.ok ? 'Pronta para o modo ao vivo' : `${readiness.blockers.length} bloqueio(s) para o modo ao vivo` }}
+          </span>
+          {{ readiness.stats.drafts }} rascunhos · {{ readiness.stats.testSent }} respostas de teste · {{ readiness.stats.chunks }} trechos na base
+        </p>
+        <ul v-if="readiness.blockers.length" class="ready-list blockers">
+          <li v-for="b in readiness.blockers" :key="b.code + b.message">{{ b.message }}</li>
+        </ul>
+        <ul v-if="readiness.warnings.length" class="ready-list warnings">
+          <li v-for="w in readiness.warnings" :key="w.code + w.message">{{ w.message }}</li>
+        </ul>
+      </section>
+
       <div v-if="error" class="met-card error-text">{{ error }}</div>
       <div v-else-if="loading && !data" class="met-card empty">Carregando...</div>
 
@@ -108,6 +124,13 @@ import { api } from '../services/api'
 import { extractError } from '../services/errorMessage'
 
 interface Recent { id: string; at: string; fromEmail: string; status: string; reason: string | null; draft: string | null }
+interface Finding { code: string; message: string }
+interface Readiness {
+  ok: boolean
+  blockers: Finding[]
+  warnings: Finding[]
+  stats: { chunks: number; sources: number; drafts: number; testSent: number; errors: number }
+}
 interface Metrics {
   mode: string
   agent: { replies: number; shadow: number; skipped: number; errors: number; skippedByReason: Record<string, number> }
@@ -123,6 +146,7 @@ const accounts = ref<{ id: string; emailAddress: string }[]>([])
 const accountId = ref<string | null>(null)
 const days = ref(30)
 const data = ref<Metrics | null>(null)
+const readiness = ref<Readiness | null>(null)
 const loading = ref(false)
 const error = ref('')
 const openId = ref<string | null>(null)
@@ -177,7 +201,12 @@ async function load() {
   if (!accountId.value) return
   loading.value = true
   try {
-    data.value = (await api.get(`/accounts/${accountId.value}/auto-reply/metrics`, { params: { days: days.value } })).data
+    const [m, r] = await Promise.all([
+      api.get(`/accounts/${accountId.value}/auto-reply/metrics`, { params: { days: days.value } }),
+      api.get(`/accounts/${accountId.value}/auto-reply/readiness`),
+    ])
+    data.value = m.data
+    readiness.value = r.data
     error.value = ''
   } catch (err) {
     error.value = extractError(err, 'Não foi possível carregar as métricas')
@@ -242,4 +271,11 @@ onUnmounted(() => clearInterval(timer))
 .badge.shadow { background: #e8f0fe; color: #1a56c4; }
 .badge.error { background: #fdecea; color: #c62828; }
 .error-text { color: #c62828; font-size: .85rem; }
+.ready-line { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+.ready-badge { padding: .15rem .6rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+.ready-badge.ok { background: #e6f4ea; color: #1e7e34; }
+.ready-badge.blocked { background: #fdecea; color: #c62828; }
+.ready-list { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .82rem; }
+.ready-list.blockers { color: #c62828; }
+.ready-list.warnings { color: #b26a00; }
 </style>

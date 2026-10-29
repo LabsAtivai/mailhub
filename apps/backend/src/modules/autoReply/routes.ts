@@ -6,6 +6,7 @@ import { scope } from '../../lib/logger'
 import { OpenAiError } from '../ai/openaiClient'
 import { getAutoReplyMetrics } from './metrics'
 import { ingestDocument, knowledgeStats } from './knowledge'
+import { checkReadiness } from './readiness'
 
 const log = scope('autoReply')
 const router = Router()
@@ -43,6 +44,19 @@ router.get('/accounts/:accountId/auto-reply/metrics', async (req: AuthRequest, r
   } catch (err) { fail(res, err) }
 })
 
+// GET /accounts/:accountId/auto-reply/readiness — checklist de prontidão para produção.
+router.get('/accounts/:accountId/auto-reply/readiness', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!(await ownsAccount(req.userId!, req.params.accountId))) { res.status(404).json({ error: 'Conta não encontrada' }); return }
+    res.json(await checkReadiness(req.params.accountId))
+  } catch (err) { fail(res, err) }
+})
+
+// GET /admin/auto-reply/:accountId/readiness — mesma verificação, para qualquer conta.
+router.get('/admin/auto-reply/:accountId/readiness', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try { res.json(await checkReadiness(req.params.accountId)) } catch (err) { fail(res, err) }
+})
+
 // PUT /admin/auto-reply/:accountId — liga/desliga e configura o agente da caixa.
 router.put('/admin/auto-reply/:accountId', requireAdmin, async (req: AuthRequest, res: Response) => {
   const parsed = ConfigSchema.safeParse(req.body)
@@ -50,6 +64,11 @@ router.put('/admin/auto-reply/:accountId', requireAdmin, async (req: AuthRequest
   try {
     const account = await prisma.mailAccount.findUnique({ where: { id: req.params.accountId }, select: { id: true } })
     if (!account) { res.status(404).json({ error: 'Conta não encontrada' }); return }
+    // Modo live só liga depois de passar na verificação de prontidão (bloqueios).
+    if (parsed.data.mode === 'live') {
+      const readiness = await checkReadiness(account.id)
+      if (!readiness.ok) { res.status(409).json({ error: 'Caixa não está pronta para o modo live', readiness }); return }
+    }
     const data = { ...parsed.data, testRecipient: parsed.data.testRecipient ?? null }
     res.json(await prisma.autoReplyConfig.upsert({
       where: { accountId: account.id }, create: { accountId: account.id, ...data }, update: data,

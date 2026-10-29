@@ -146,6 +146,23 @@ ${input.body || '[sem corpo]'}
   return text
 }
 
+// Chamada genérica com instruções próprias (usada pelo respondedor automático,
+// que tem prompt separado do botão "Gerar resposta").
+export async function generateWithInstructions(instructions: string, input: string, maxOutputTokens = 700): Promise<string> {
+  const res = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey()}` },
+    body: JSON.stringify({ model: CHAT_MODEL, instructions, input, max_output_tokens: maxOutputTokens }),
+  })
+  const raw = await res.text()
+  let data: any = null
+  try { data = raw ? JSON.parse(raw) : null } catch { data = null }
+  if (!res.ok) throw new OpenAiError(data?.error?.message || `Erro da OpenAI (${res.status})`)
+  const text: string | undefined = data?.output_text?.trim() || extractTextFromResponse(data)
+  if (!text) throw new OpenAiError('A OpenAI respondeu sem texto final')
+  return text
+}
+
 function extractTextFromResponse(data: any): string {
   try {
     const texts: string[] = []
