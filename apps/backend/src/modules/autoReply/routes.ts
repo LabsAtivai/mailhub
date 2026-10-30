@@ -8,6 +8,7 @@ import { getAutoReplyMetrics } from './metrics'
 import { ingestDocument, knowledgeStats } from './knowledge'
 import { checkReadiness } from './readiness'
 import { listAssets, upsertAsset } from './assets'
+import { getAutoReplyOverview } from './overview'
 
 const log = scope('autoReply')
 const router = Router()
@@ -58,6 +59,21 @@ router.get('/accounts/:accountId/auto-reply/readiness', async (req: AuthRequest,
   try {
     if (!(await ownsAccount(req.userId!, req.params.accountId))) { res.status(404).json({ error: 'Conta não encontrada' }); return }
     res.json(await checkReadiness(req.params.accountId))
+  } catch (err) { fail(res, err) }
+})
+
+// GET /admin/auto-reply/overview?emails=a@x,b@y&domain=x.com&withAgent=1&readiness=1
+// Dados de todas as caixas para o onboarding (sem credenciais). Declarada antes das rotas com :accountId.
+router.get('/admin/auto-reply/overview', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const flag = (v: unknown) => v === '1' || v === 'true'
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
+  try {
+    res.json(await getAutoReplyOverview({
+      emails: str(req.query.emails)?.split(','),
+      domain: str(req.query.domain),
+      withAgent: flag(req.query.withAgent),
+      readiness: flag(req.query.readiness),
+    }))
   } catch (err) { fail(res, err) }
 })
 
