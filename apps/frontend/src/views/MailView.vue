@@ -532,17 +532,21 @@ const isViewingSentOrDrafts = computed(() => {
 // Pasta Spam/Junk: habilita "Não é spam". Servidores nem sempre anunciam \Junk,
 // então cai no nome/caminho como fallback.
 const SPAM_NAMES = new Set(['spam', 'junk', 'junk e-mail', 'junk email', 'inbox.spam', 'inbox.junk', '[gmail]/spam'])
-const isViewingSpam = computed(() => {
-  for (const folders of Object.values(mail.foldersByAccount)) {
+// Devolve a conta dona da pasta Spam aberta: selectedAccountId fica null em
+// busca/etiqueta/caixa unificada, então a conta vem da própria pasta.
+const spamContext = computed<{ accountId: string } | null>(() => {
+  for (const [accountId, folders] of Object.entries(mail.foldersByAccount)) {
     const f = folders.find(x => x.id === mail.selectedFolderId)
     if (f) {
-      return f.specialUse === '\\Junk'
+      const isSpam = f.specialUse === '\\Junk'
         || SPAM_NAMES.has(f.path.toLowerCase())
         || SPAM_NAMES.has(f.name.toLowerCase())
+      return isSpam ? { accountId } : null
     }
   }
-  return false
+  return null
 })
+const isViewingSpam = computed(() => spamContext.value !== null)
 
 const visibleAttachments = computed(() =>
   (mail.selectedMessage?.attachments ?? []).filter(a => !a.isInline)
@@ -707,7 +711,8 @@ async function onBulkDelete() {
 }
 
 function spamTargetInboxId(): string | null {
-  const inboxId = mail.selectedAccountId ? mail.inboxFolderIdFor(mail.selectedAccountId) : null
+  const accountId = spamContext.value?.accountId
+  const inboxId = accountId ? mail.inboxFolderIdFor(accountId) : null
   if (!inboxId) {
     toast.add({ severity: 'error', summary: 'Caixa de entrada não encontrada nesta conta', life: 4000 })
   }
@@ -733,7 +738,7 @@ async function onBulkNotSpam() {
     toast.add({
       severity: failed === total ? 'error' : 'warn',
       summary: failed === total ? 'Falha ao mover mensagens' : 'Algumas mensagens não foram movidas',
-      detail: `${failed} de ${total} movimentações falharam`,
+      detail: `${failed} de ${total} movimentações falharam; elas continuam selecionadas para tentar de novo`,
       life: 4000,
     })
   } else {

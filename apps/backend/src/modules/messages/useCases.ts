@@ -110,6 +110,35 @@ export const messageUseCases = {
     }))
   },
 
+  // Move várias mensagens de uma vez: 1 evento por pasta de origem, pro worker
+  // fazer um único messageMove e um único sync do destino (em vez de N).
+  // Mensagens inválidas não derrubam o lote — voltam em failedIds.
+  async moveBatch(messageIds: string[], userId: string, targetFolderId: string) {
+    const target = await requireOwnedFolder(targetFolderId, userId)
+    const failedIds: string[] = []
+    const groups = new Map<string, { accountId: string; items: { messageId: string; uid: string }[] }>()
+
+    for (const id of [...new Set(messageIds)]) {
+      const msg = await repo.findMessageWithOwner(id)
+      const valid = msg
+        && msg.folder.account.userId === userId
+        && msg.folder.account.id === target.account.id
+        && msg.folderId !== targetFolderId
+      if (!msg || !valid) { failedIds.push(id); continue }
+      const group = groups.get(msg.folderId) ?? { accountId: msg.folder.account.id, items: [] }
+      group.items.push({ messageId: msg.id, uid: msg.uid.toString() })
+      groups.set(msg.folderId, group)
+    }
+
+    for (const [sourceFolderId, group] of groups) {
+      await redis.publish('mailhub:message:moveBatch', JSON.stringify({
+        accountId: group.accountId, sourceFolderId, targetFolderId, items: group.items,
+      }))
+    }
+    const queued = [...groups.values()].reduce((n, g) => n + g.items.length, 0)
+    return { queued, failedIds }
+  },
+
   async remove(messageId: string, userId: string) {
     const msg = await requireOwnedMessage(messageId, userId)
     const trash = await repo.findTrashFolder(msg.folder.account.id)

@@ -295,11 +295,32 @@ export const useMailStore = defineStore('mail', () => {
     }
   }
 
+  // Lotes de até 100 (limite do endpoint), enviados EM SÉRIE: o worker faz um
+  // messageMove + um sync da pasta de destino por lote, em vez de N syncs.
+  const MOVE_BATCH_SIZE = 100
+
   async function bulkMove(ids: string[], targetFolderId: string) {
-    const results = await Promise.all(ids.map(id => moveMessage(id, targetFolderId).then(() => true).catch(() => false)))
-    clearSelection()
-    const failed = results.filter(ok => !ok).length
-    return { total: ids.length, failed }
+    const failedIds: string[] = []
+    const movedIds = new Set<string>()
+    for (let i = 0; i < ids.length; i += MOVE_BATCH_SIZE) {
+      const chunk = ids.slice(i, i + MOVE_BATCH_SIZE)
+      try {
+        const { data } = await api.post('/messages/move-batch', { messageIds: chunk, folderId: targetFolderId })
+        const rejected = new Set<string>(data?.failedIds ?? [])
+        for (const id of chunk) {
+          if (rejected.has(id)) failedIds.push(id)
+          else movedIds.add(id)
+        }
+      } catch {
+        failedIds.push(...chunk)
+      }
+    }
+    messages.value = messages.value.filter(x => !movedIds.has(x.id))
+    searchResults.value = searchResults.value.filter(x => !movedIds.has(x.id))
+    if (selectedMessage.value && movedIds.has(selectedMessage.value.id)) selectedMessage.value = null
+    // quem falhou continua selecionado, pra o usuário poder repetir só essas
+    selectedIds.value = new Set(failedIds)
+    return { total: ids.length, failed: failedIds.length, failedIds }
   }
 
   function inboxFolderIdFor(accountId: string): string | null {
