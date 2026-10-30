@@ -9,6 +9,11 @@ export const MoveMessageSchema = z.object({
   folderId: z.string().uuid(),
 })
 
+export const MoveBatchSchema = z.object({
+  messageIds: z.array(z.string().uuid()).min(1).max(100),
+  folderId: z.string().uuid(),
+})
+
 export const SendAttachmentSchema = z.object({
   filename: z.string().min(1),
   mimeType: z.string().optional(),

@@ -43,6 +43,7 @@ sub.subscribe(
   'mailhub:flag:refresh',
   'mailhub:flag:update',
   'mailhub:message:move',
+  'mailhub:message:moveBatch',
   'mailhub:message:delete',
   'mailhub:sent:append',
   'mailhub:fetch:attachment',
@@ -63,6 +64,10 @@ const FlagUpdateSchema = z.object({
 const MoveSchema = z.object({
   accountId: z.string(), uid: z.string(), messageId: z.string(),
   sourceFolderId: z.string(), targetFolderId: z.string(),
+})
+const MoveBatchSchema = z.object({
+  accountId: z.string(), sourceFolderId: z.string(), targetFolderId: z.string(),
+  items: z.array(z.object({ messageId: z.string(), uid: z.string() })).min(1),
 })
 const DeleteSchema = z.object({
   accountId: z.string(), uid: z.string(), messageId: z.string(),
@@ -108,6 +113,11 @@ sub.on('message', async (channel: string, message: string) => {
       case 'mailhub:message:move': {
         const p = MoveSchema.parse(raw)
         await runSerialForAccount(p.accountId, () => handleMove(p))
+        break
+      }
+      case 'mailhub:message:moveBatch': {
+        const p = MoveBatchSchema.parse(raw)
+        await runSerialForAccount(p.accountId, () => handleMoveBatch(p))
         break
       }
       case 'mailhub:message:delete': {
@@ -212,6 +222,41 @@ async function handleMove(payload: MovePayload) {
   // pasta de destino resolve o mesmo problema sem o custo de vasculhar pastas
   // que não mudaram; refreshCounts na origem (sem IMAP, só COUNT no Postgres)
   // mantém o contador de não lidos dela correto sem precisar do sync inteiro.
+  const since = new Date(Date.now() - SYNC_DAYS * 864e5)
+  await Promise.all([
+    syncMessages(client, accountId, target.id, target.path, since, false, target.specialUse === '\\Trash'),
+    refreshCounts(accountId, sourceFolderId),
+  ])
+}
+
+interface MoveBatchPayload {
+  accountId: string; sourceFolderId: string; targetFolderId: string
+  items: { messageId: string; uid: string }[]
+}
+
+// Versão em lote do handleMove: um único messageMove (UIDs separados por
+// vírgula) e UM sync da pasta de destino no fim, em vez de um por mensagem.
+async function handleMoveBatch(payload: MoveBatchPayload) {
+  const { accountId, sourceFolderId, targetFolderId, items } = payload
+  const [source, target] = await Promise.all([
+    prisma.folder.findUnique({ where: { id: sourceFolderId } }),
+    prisma.folder.findUnique({ where: { id: targetFolderId } }),
+  ])
+  if (!source || !target) return
+
+  const client = await getInteractiveClient(accountId)
+  const lock = await client.getMailboxLock(source.path)
+  try {
+    await client.messageMove(items.map(i => i.uid).join(','), target.path, { uid: true })
+  } finally {
+    lock.release()
+  }
+
+  const messageIds = items.map(i => i.messageId)
+  await prisma.message.deleteMany({ where: { id: { in: messageIds } } })
+  for (const messageId of messageIds) {
+    await redis.publish('mail:deleted', JSON.stringify({ accountId, messageId, folderId: sourceFolderId }))
+  }
   const since = new Date(Date.now() - SYNC_DAYS * 864e5)
   await Promise.all([
     syncMessages(client, accountId, target.id, target.path, since, false, target.specialUse === '\\Trash'),

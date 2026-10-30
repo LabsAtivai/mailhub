@@ -62,6 +62,9 @@ model MailAccount {
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   folders           Folder[]
   clientProfiles    ClientProfile[]
+  autoReplyConfig   AutoReplyConfig?
+  autoReplyLogs     AutoReplyLog[]
+  clientAssets      ClientAsset[]
 }
 
 model Folder {
@@ -189,4 +192,74 @@ model ClientProfile {
   account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@unique([accountId, domain])
+}
+
+// Respondedor automático por caixa. `mode`: off | shadow (só gera rascunho no
+// log) | test (envia, mas sempre pra testRecipient) | live (envia ao remetente).
+// A base de conhecimento (ClientKnowledgeChunk, pgvector) é criada via SQL em
+// modules/autoReply/knowledge.ts — mesmo esquema do MessageEmbedding.
+model AutoReplyConfig {
+  accountId     String      @id
+  mode          String      @default("off")
+  testRecipient String?
+  clientName    String      @default("")
+  signature     String      @default("")
+  dailyLimit    Int         @default(50)
+  updatedAt     DateTime    @updatedAt
+  account       MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+// Um registro por mensagem recebida processada: o unique em messageId é o
+// que impede resposta dupla (claim antes de gerar).
+model AutoReplyLog {
+  id         String      @id @default(uuid())
+  accountId  String
+  messageId  String      @unique
+  fromEmail  String
+  threadKey  String
+  status     String
+  reason     String?
+  draft      String?
+  sentTo     String?
+  attachment String?
+  createdAt  DateTime    @default(now())
+  account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@index([accountId, fromEmail, threadKey, createdAt])
+}
+
+// Base de conhecimento do respondedor automático (modules/autoReply/knowledge.ts).
+// Declarada aqui só para o `prisma db push` do boot reconhecer a tabela: antes ela
+// existia apenas via SQL e o push tentava apagá-la, derrubando o backend. Colunas e
+// índice espelham o CREATE TABLE de knowledge.ts; o acesso continua por SQL (pgvector).
+model ClientKnowledgeChunk {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId  String
+  source     String
+  chunkIndex Int
+  content    String
+  embedding  Unsupported("vector(1536)")
+  model      String
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([accountId, source], map: "ClientKnowledgeChunk_account_idx")
+}
+
+// Arquivos que o agente pode anexar por cliente (ex: kind "presentation" = PDF de
+// apresentação). O conteúdo fica no banco; driveFileId só registra a origem para
+// ressincronizar (respondedor/scripts/upload_asset.py).
+model ClientAsset {
+  id          String      @id @default(uuid())
+  accountId   String
+  kind        String
+  filename    String
+  mimeType    String      @default("application/pdf")
+  driveFileId String?
+  size        Int
+  content     Bytes
+  updatedAt   DateTime    @updatedAt
+  account     MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, kind])
 }

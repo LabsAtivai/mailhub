@@ -2,7 +2,7 @@ import { Router, Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import { requireAuth, AuthRequest } from '../../middleware/auth'
 import { messageUseCases as uc, NotFoundError, ForbiddenError, SmtpError, ValidationError } from './useCases'
-import { SetFlagsSchema, MoveMessageSchema, SendMailSchema, AssignLabelSchema } from './dto'
+import { SetFlagsSchema, MoveMessageSchema, MoveBatchSchema, SendMailSchema, AssignLabelSchema } from './dto'
 import { scope } from '../../lib/logger'
 
 const log = scope('messages')
@@ -66,6 +66,16 @@ router.patch('/messages/:id', async (req: AuthRequest, res: Response) => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
   try {
     res.json(await uc.setFlags(req.params.id, req.userId!, parsed.data))
+  } catch (err) { handle(res, err) }
+})
+
+// POST /messages/move-batch
+router.post('/messages/move-batch', async (req: AuthRequest, res: Response) => {
+  const parsed = MoveBatchSchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  try {
+    const result = await uc.moveBatch(parsed.data.messageIds, req.userId!, parsed.data.folderId)
+    res.json({ ok: true, ...result })
   } catch (err) { handle(res, err) }
 })
 
