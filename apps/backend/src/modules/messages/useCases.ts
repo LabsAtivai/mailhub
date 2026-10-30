@@ -100,7 +100,10 @@ export const messageUseCases = {
 
   async move(messageId: string, userId: string, targetFolderId: string) {
     const msg = await requireOwnedMessage(messageId, userId)
-    await requireOwnedFolder(targetFolderId, userId)
+    const target = await requireOwnedFolder(targetFolderId, userId)
+    if (target.account.id !== msg.folder.account.id) {
+      throw new ValidationError('A pasta de destino deve pertencer à mesma conta')
+    }
     await redis.publish('mailhub:message:move', JSON.stringify({
       messageId: msg.id, accountId: msg.folder.account.id,
       sourceFolderId: msg.folderId, targetFolderId, uid: msg.uid.toString(),

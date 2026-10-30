@@ -136,6 +136,8 @@
             v-tooltip="'Marcar como lido'" @click="mail.bulkMarkRead([...mail.selectedIds], true)" />
           <Button icon="pi pi-eye-slash" text rounded size="small"
             v-tooltip="'Marcar como não lido'" @click="mail.bulkMarkRead([...mail.selectedIds], false)" />
+          <Button v-if="isViewingSpam" icon="pi pi-inbox" text rounded size="small"
+            v-tooltip="'Não é spam (mover para a Caixa de entrada)'" @click="onBulkNotSpam" />
           <Button icon="pi pi-trash" text rounded size="small" severity="danger"
             v-tooltip="'Excluir selecionados'" @click="onBulkDelete" />
           <select class="bulk-label-select" @change="onBulkLabelSelect($event)">
@@ -249,6 +251,8 @@
             v-tooltip="mail.selectedMessage.isRead ? 'Marcar como não lido' : 'Marcar como lido'">
             <i :class="['pi', mail.selectedMessage.isRead ? 'pi-envelope' : 'pi-envelope-open']"></i>
           </Button>
+          <Button v-if="isViewingSpam" icon="pi pi-inbox" text size="small" label="Não é spam"
+            @click="onNotSpam(mail.selectedMessage!.id)" v-tooltip="'Mover para a Caixa de entrada'" />
           <Button icon="pi pi-trash" text rounded size="small" severity="danger"
             @click="mail.deleteMessage(mail.selectedMessage!.id)" v-tooltip="'Lixeira'" />
         </div>
@@ -525,6 +529,21 @@ const isViewingSentOrDrafts = computed(() => {
   return false
 })
 
+// Pasta Spam/Junk: habilita "Não é spam". Servidores nem sempre anunciam \Junk,
+// então cai no nome/caminho como fallback.
+const SPAM_NAMES = new Set(['spam', 'junk', 'junk e-mail', 'junk email', 'inbox.spam', 'inbox.junk', '[gmail]/spam'])
+const isViewingSpam = computed(() => {
+  for (const folders of Object.values(mail.foldersByAccount)) {
+    const f = folders.find(x => x.id === mail.selectedFolderId)
+    if (f) {
+      return f.specialUse === '\\Junk'
+        || SPAM_NAMES.has(f.path.toLowerCase())
+        || SPAM_NAMES.has(f.name.toLowerCase())
+    }
+  }
+  return false
+})
+
 const visibleAttachments = computed(() =>
   (mail.selectedMessage?.attachments ?? []).filter(a => !a.isInline)
 )
@@ -684,6 +703,41 @@ async function onBulkDelete() {
       detail: `${failed} de ${total} exclusões falharam`,
       life: 4000,
     })
+  }
+}
+
+function spamTargetInboxId(): string | null {
+  const inboxId = mail.selectedAccountId ? mail.inboxFolderIdFor(mail.selectedAccountId) : null
+  if (!inboxId) {
+    toast.add({ severity: 'error', summary: 'Caixa de entrada não encontrada nesta conta', life: 4000 })
+  }
+  return inboxId
+}
+
+async function onNotSpam(id: string) {
+  const inboxId = spamTargetInboxId()
+  if (!inboxId) return
+  try {
+    await mail.moveMessage(id, inboxId)
+    toast.add({ severity: 'success', summary: 'Movida para a Caixa de entrada', life: 2500 })
+  } catch {
+    toast.add({ severity: 'error', summary: 'Falha ao mover mensagem', life: 4000 })
+  }
+}
+
+async function onBulkNotSpam() {
+  const inboxId = spamTargetInboxId()
+  if (!inboxId) return
+  const { total, failed } = await mail.bulkMove([...mail.selectedIds], inboxId)
+  if (failed > 0) {
+    toast.add({
+      severity: failed === total ? 'error' : 'warn',
+      summary: failed === total ? 'Falha ao mover mensagens' : 'Algumas mensagens não foram movidas',
+      detail: `${failed} de ${total} movimentações falharam`,
+      life: 4000,
+    })
+  } else {
+    toast.add({ severity: 'success', summary: `${total} mensagem(ns) movida(s) para a Caixa de entrada`, life: 2500 })
   }
 }
 

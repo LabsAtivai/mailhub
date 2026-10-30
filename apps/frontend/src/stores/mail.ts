@@ -283,6 +283,32 @@ export const useMailStore = defineStore('mail', () => {
     }
   }
 
+  async function moveMessage(id: string, targetFolderId: string) {
+    await api.post(`/messages/${id}/move`, { folderId: targetFolderId })
+    messages.value = messages.value.filter(x => x.id !== id)
+    searchResults.value = searchResults.value.filter(x => x.id !== id)
+    if (selectedMessage.value?.id === id) selectedMessage.value = null
+    if (selectedIds.value.has(id)) {
+      const next = new Set(selectedIds.value)
+      next.delete(id)
+      selectedIds.value = next
+    }
+  }
+
+  async function bulkMove(ids: string[], targetFolderId: string) {
+    const results = await Promise.all(ids.map(id => moveMessage(id, targetFolderId).then(() => true).catch(() => false)))
+    clearSelection()
+    const failed = results.filter(ok => !ok).length
+    return { total: ids.length, failed }
+  }
+
+  function inboxFolderIdFor(accountId: string): string | null {
+    const inbox = (foldersByAccount.value[accountId] ?? []).find(
+      (f: Folder) => f.specialUse === '\\Inbox' || f.path === 'INBOX' || f.name.toLowerCase() === 'inbox'
+    )
+    return inbox?.id ?? null
+  }
+
   function updateFolderUnread(folderId: string, delta: number) {
     const updated = { ...foldersByAccount.value }
     for (const [accId, folders] of Object.entries(updated)) {
@@ -456,5 +482,6 @@ export const useMailStore = defineStore('mail', () => {
     selectMessage, refreshMessage, toggleFlag, toggleRead, deleteMessage,
     search, loadLabelMessages, loadUnifiedInbox, loadMoreUnified,
     toggleSelectMessage, selectAllMessages, clearSelection, bulkMarkRead, bulkDelete,
+    moveMessage, bulkMove, inboxFolderIdFor,
   }
 })
