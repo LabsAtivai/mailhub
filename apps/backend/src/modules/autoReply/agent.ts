@@ -7,7 +7,8 @@ import { getAssetAttachment, getAssetMeta, PRESENTATION_KIND } from './assets'
 import { sanitizeEmailBody, cleanupFinalEmail } from './sanitize'
 import { messageUseCases } from '../messages/useCases'
 import { searchKnowledge } from './knowledge'
-import { isAutomatic, isSelf, looksLikeOptOut, threadKeyOf, unwrapForwarded, type SkipReason } from './filters'
+import { isSuppressed, suppress } from './suppression'
+import { isAutomatic, isSelf, isStale, looksLikeOptOut, threadKeyOf, unwrapForwarded, type SkipReason } from './filters'
 
 const log = scope('autoReply')
 
@@ -48,7 +49,7 @@ export async function onBodyReady(accountId: string, messageId: string) {
   const msg = await prisma.message.findUnique({
     where: { id: messageId },
     select: {
-      id: true, subject: true, fromEmail: true, textBody: true, htmlBody: true, messageId: true,
+      id: true, date: true, subject: true, fromEmail: true, textBody: true, htmlBody: true, messageId: true,
       folder: { select: { specialUse: true, account: { select: { userId: true, emailAddress: true } } } },
     },
   })
@@ -76,8 +77,15 @@ export async function onBodyReady(accountId: string, messageId: string) {
 
   let skip: SkipReason | null = null
   if (isSelf(msg.fromEmail || '', msg.folder.account.emailAddress)) skip = unwrapped ? null : 'self'
+  // Frescor só vale para mensagem real; reenvio de teste (unwrapped) usa data de agora.
+  if (!skip && !unwrapped && isStale(msg.date)) skip = 'stale'
   skip = skip ?? isAutomatic(fromEmail, subject) ?? (!body.trim() ? 'empty' : null)
   if (skip) return finish('skipped', { reason: skip })
+
+  // Descadastro vale para o cliente inteiro (todas as caixas que compartilham o conteúdo).
+  const clientKey = cfg.knowledgeAccountId ?? accountId
+  if (await isSuppressed(clientKey, fromEmail)) return finish('skipped', { reason: 'suppressed' })
+  if (looksLikeOptOut(body)) await suppress(clientKey, fromEmail, 'opt_out')
 
   const since = new Date(Date.now() - THREAD_WINDOW_MS)
   const recent = await prisma.autoReplyLog.count({
@@ -93,7 +101,7 @@ export async function onBodyReady(accountId: string, messageId: string) {
   if (today >= cfg.dailyLimit) return finish('skipped', { reason: 'daily_limit' })
 
   try {
-    const knowledge = await searchKnowledge(accountId, `${subject}\n\n${body}`.slice(0, 4000))
+    const knowledge = await searchKnowledge(cfg.knowledgeAccountId ?? accountId, `${subject}\n\n${body}`.slice(0, 4000))
     const clientContext = [
       `Empresa representada: ${cfg.clientName || 'o cliente'}.`,
       looksLikeOptOut(body) ? 'ATENÇÃO: o remetente parece pedir remoção da lista — siga a regra de PEDIDO DE REMOÇÃO.' : '',
@@ -101,14 +109,14 @@ export async function onBodyReady(accountId: string, messageId: string) {
       knowledge.length ? knowledge.join('\n\n---\n\n') : '[base de conhecimento vazia para este cliente]',
     ].filter(Boolean).join('\n')
 
-    const presentation = await getAssetMeta(accountId, PRESENTATION_KIND)
+    const presentation = await getAssetMeta(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND)
     const raw = await generateWithInstructions(
       AGENT_SYSTEM_INSTRUCTIONS,
       buildAgentPrompt({ subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext, attachmentName: presentation?.filename }),
     )
     const flagged = extractAttachFlag(raw)
     const draft = cleanupFinalEmail(flagged.text)
-    const attachment = presentation && flagged.attach ? await getAssetAttachment(accountId, PRESENTATION_KIND) : null
+    const attachment = presentation && flagged.attach ? await getAssetAttachment(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND) : null
     if (draft.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
     if (cfg.mode === 'shadow') return finish('shadow', { draft, attachment: attachment?.filename })
 

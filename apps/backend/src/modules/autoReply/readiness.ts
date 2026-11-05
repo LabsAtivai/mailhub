@@ -40,10 +40,11 @@ export async function checkReadiness(accountId: string): Promise<Readiness> {
 
   const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId } })
 
+  const contentId = cfg?.knowledgeAccountId ?? accountId // dona do conteúdo (cliente com N caixas)
   let rows: Array<{ source: string; content: string }> = []
   try {
     rows = await prisma.$queryRaw<Array<{ source: string; content: string }>>`
-      SELECT source, content FROM "ClientKnowledgeChunk" WHERE "accountId" = ${accountId}`
+      SELECT source, content FROM "ClientKnowledgeChunk" WHERE "accountId" = ${contentId}`
   } catch { /* tabela ainda não criada: tratada como base vazia */ }
 
   const bySource = new Map<string, { placeholder: boolean; cnpj: boolean; secret: boolean; generic: number; total: number }>()
@@ -69,7 +70,7 @@ export async function checkReadiness(accountId: string): Promise<Readiness> {
     if (s.generic > 0) warnings.push({ code: 'generic_ativa', message: `${source}: ${s.generic} de ${s.total} trechos parecem do onboarding da Ativa.ai, e não da oferta do cliente.` })
   }
 
-  if (!(await getAssetMeta(accountId, PRESENTATION_KIND))) {
+  if (!(await getAssetMeta(contentId, PRESENTATION_KIND))) {
     warnings.push({ code: 'no_presentation', message: 'Sem PDF de apresentação cadastrado: o agente não consegue anexar material.' })
   }
 

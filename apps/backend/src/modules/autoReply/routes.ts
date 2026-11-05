@@ -20,6 +20,7 @@ const ConfigSchema = z.object({
   clientName: z.string().max(200).optional(),
   signature: z.string().max(2000).optional(),
   dailyLimit: z.number().int().min(1).max(500).optional(),
+  knowledgeAccountId: z.string().uuid().nullable().optional(),
 }).refine(v => v.mode !== 'test' || !!v.testRecipient, { message: 'testRecipient obrigatório no modo test' })
 
 const DocumentSchema = z.object({
@@ -89,12 +90,19 @@ router.put('/admin/auto-reply/:accountId', requireAdmin, async (req: AuthRequest
   try {
     const account = await prisma.mailAccount.findUnique({ where: { id: req.params.accountId }, select: { id: true } })
     if (!account) { res.status(404).json({ error: 'Conta não encontrada' }); return }
+    const owner = parsed.data.knowledgeAccountId
+    if (owner) {
+      if (owner === account.id) { res.status(400).json({ error: 'knowledgeAccountId não pode ser a própria caixa' }); return }
+      const ownerCfg = await prisma.autoReplyConfig.findUnique({ where: { accountId: owner }, select: { knowledgeAccountId: true } })
+      if (!ownerCfg) { res.status(400).json({ error: 'Caixa dona do conteúdo não tem configuração do agente' }); return }
+      if (ownerCfg.knowledgeAccountId) { res.status(400).json({ error: 'A caixa dona não pode apontar para outra (sem encadeamento)' }); return }
+    }
     // Modo live só liga depois de passar na verificação de prontidão (bloqueios).
     if (parsed.data.mode === 'live') {
       const readiness = await checkReadiness(account.id)
       if (!readiness.ok) { res.status(409).json({ error: 'Caixa não está pronta para o modo live', readiness }); return }
     }
-    const data = { ...parsed.data, testRecipient: parsed.data.testRecipient ?? null }
+    const data = { ...parsed.data, testRecipient: parsed.data.testRecipient ?? null, knowledgeAccountId: parsed.data.knowledgeAccountId ?? null }
     res.json(await prisma.autoReplyConfig.upsert({
       where: { accountId: account.id }, create: { accountId: account.id, ...data }, update: data,
     }))

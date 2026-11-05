@@ -22,7 +22,14 @@ const OPT_OUT = [
 ]
 
 export type SkipReason =
-  | 'self' | 'automatic' | 'noreply' | 'opt_out' | 'empty' | 'thread_recent' | 'daily_limit'
+  | 'self' | 'automatic' | 'noreply' | 'opt_out' | 'empty' | 'thread_recent' | 'daily_limit' | 'stale' | 'suppressed'
+
+// Mensagem antiga não recebe resposta automática: cobre sincronização inicial,
+// reprocessamento e e-mail movido do Spam para a Inbox (a data original se mantém).
+export const MAX_MESSAGE_AGE_MS = 24 * 60 * 60 * 1000
+export function isStale(date: Date, now: number = Date.now()): boolean {
+  return now - date.getTime() > MAX_MESSAGE_AGE_MS
+}
 
 export function isSelf(fromEmail: string, accountEmail: string): boolean {
   return fromEmail.trim().toLowerCase() === accountEmail.trim().toLowerCase()

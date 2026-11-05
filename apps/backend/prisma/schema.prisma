@@ -202,8 +202,23 @@ model AutoReplyConfig {
   clientName    String      @default("")
   signature     String      @default("")
   dailyLimit    Int         @default(50)
+  // Um cliente pode ter N caixas com o mesmo conteúdo: as caixas extras apontam aqui
+  // para a caixa "dona" da base de conhecimento e dos anexos. Null = usa a própria.
+  knowledgeAccountId String?
   updatedAt     DateTime    @updatedAt
   account       MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+// Lista de não contatar do respondedor, por cliente (clientKey = caixa dona do
+// conteúdo). Quem pede descadastro numa caixa não recebe resposta de nenhuma outra.
+model AutoReplySuppression {
+  id        String   @id @default(uuid())
+  clientKey String
+  email     String
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@unique([clientKey, email])
 }
 
 // Um registro por mensagem recebida processada: o unique em messageId é o
