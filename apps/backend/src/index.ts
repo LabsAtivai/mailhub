@@ -23,6 +23,7 @@ import labelRoutes from './modules/labels/routes'
 import adminRoutes from './modules/admin/routes'
 import autoReplyRoutes from './modules/autoReply/routes'
 import { onNewMessage as autoReplyOnNew, onBodyReady as autoReplyOnBody } from './modules/autoReply/agent'
+import { syncPendingSuppressions } from './modules/autoReply/snov'
 import aiRoutes from './modules/ai/routes'
 import clientRoutes from './modules/clients/routes'
 import negativacaoRoutes from './modules/negativacao/routes'
@@ -233,6 +234,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const PORT = process.env.PORT || 3001
 server.listen(PORT, () => logger.info({ port: PORT }, 'mailhub-backend listening'))
+
+// Retentativa do espelho de descadastros no Do-Not-Email do Snov.io (a cada 10 min).
+setInterval(() => {
+  syncPendingSuppressions().catch(err => logger.warn({ err }, 'snov suppression retry failed'))
+}, 10 * 60 * 1000).unref()
 
 // ── graceful shutdown ───────────────────────────────────────────────────────
 async function shutdown(signal: string) {

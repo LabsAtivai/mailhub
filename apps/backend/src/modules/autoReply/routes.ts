@@ -9,6 +9,8 @@ import { ingestDocument, knowledgeStats } from './knowledge'
 import { checkReadiness } from './readiness'
 import { listAssets, upsertAsset } from './assets'
 import { getAutoReplyOverview } from './overview'
+import { syncPendingSuppressions } from './snov'
+import { encrypt } from '../../lib/crypto'
 
 const log = scope('autoReply')
 const router = Router()
@@ -22,6 +24,12 @@ const ConfigSchema = z.object({
   dailyLimit: z.number().int().min(1).max(500).optional(),
   knowledgeAccountId: z.string().uuid().nullable().optional(),
 }).refine(v => v.mode !== 'test' || !!v.testRecipient, { message: 'testRecipient obrigatório no modo test' })
+
+const SnovSchema = z.object({
+  clientId: z.string().min(1).max(200),
+  clientSecret: z.string().min(1).max(500),
+  listId: z.number().int().positive(),
+})
 
 const DocumentSchema = z.object({
   source: z.string().min(1).max(200),
@@ -118,6 +126,34 @@ router.post('/admin/auto-reply/:accountId/knowledge', requireAdmin, async (req: 
     if (!account) { res.status(404).json({ error: 'Conta não encontrada' }); return }
     const chunks = await ingestDocument(account.id, parsed.data.source, parsed.data.text)
     res.json({ source: parsed.data.source, chunks })
+  } catch (err) { fail(res, err) }
+})
+
+// PUT /admin/auto-reply/:accountId/snov — credenciais da API Snov.io do cliente (accountId = caixa dona).
+router.put('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const parsed = SnovSchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  try {
+    const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId: req.params.accountId }, select: { knowledgeAccountId: true } })
+    if (!cfg) { res.status(404).json({ error: 'Caixa sem configuração do agente' }); return }
+    if (cfg.knowledgeAccountId) { res.status(400).json({ error: 'Cadastre o Snov na caixa dona do conteúdo, não numa filha' }); return }
+    const data = { clientIdEnc: encrypt(parsed.data.clientId), clientSecretEnc: encrypt(parsed.data.clientSecret), listId: parsed.data.listId }
+    await prisma.clientSnovConfig.upsert({ where: { clientKey: req.params.accountId }, create: { clientKey: req.params.accountId, ...data }, update: data })
+    const synced = await syncPendingSuppressions(req.params.accountId)
+    res.json({ ok: true, listId: parsed.data.listId, syncedPending: synced })
+  } catch (err) { fail(res, err) }
+})
+
+// GET /admin/auto-reply/:accountId/snov — estado, sem segredos.
+router.get('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const key = req.params.accountId
+    const cfg = await prisma.clientSnovConfig.findUnique({ where: { clientKey: key }, select: { listId: true } })
+    const [pending, total] = await Promise.all([
+      prisma.autoReplySuppression.count({ where: { clientKey: key, snovSyncedAt: null } }),
+      prisma.autoReplySuppression.count({ where: { clientKey: key } }),
+    ])
+    res.json({ configured: !!cfg, listId: cfg?.listId ?? null, suppressed: total, pendingSnovSync: pending })
   } catch (err) { fail(res, err) }
 })
 

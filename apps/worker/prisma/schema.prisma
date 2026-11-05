@@ -220,8 +220,23 @@ model AutoReplySuppression {
   email     String
   reason    String
   createdAt DateTime @default(now())
+  // Espelho na lista Do-Not-Email do Snov.io do cliente (snov.ts). Null = pendente.
+  snovSyncedAt DateTime?
+  snovAttempts Int      @default(0)
+  snovError    String?
 
   @@unique([clientKey, email])
+  @@index([snovSyncedAt])
+}
+
+// Credenciais da API do Snov.io de cada cliente (uma conta Snov por cliente).
+// clientKey = caixa dona do conteúdo. Segredos cifrados com AES-256-GCM (lib/crypto).
+model ClientSnovConfig {
+  clientKey       String   @id
+  clientIdEnc     String
+  clientSecretEnc String
+  listId          Int
+  updatedAt       DateTime @updatedAt
 }
 
 // Um registro por mensagem recebida processada: o unique em messageId é o
