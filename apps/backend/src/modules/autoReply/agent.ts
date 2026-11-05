@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { prisma } from '../../lib/prisma'
 import { redis } from '../../lib/redis'
 import { scope } from '../../lib/logger'
@@ -43,6 +44,19 @@ export async function onNewMessage(payload: { accountId: string; messageId: stri
   await redis.publish('mailhub:fetch:body', JSON.stringify({ messageId: payload.messageId }))
 }
 
+type AgentConfig = NonNullable<Awaited<ReturnType<typeof getConfig>>>
+
+interface IncomingMessage {
+  id: string
+  date: Date
+  subject: string | null
+  fromEmail: string | null
+  textBody: string | null
+  htmlBody: string | null
+  messageId: string | null
+  folder: { account: { userId: string; emailAddress: string } }
+}
+
 export async function onBodyReady(accountId: string, messageId: string) {
   const cfg = await getConfig(accountId)
   if (!cfg) return
@@ -54,7 +68,36 @@ export async function onBodyReady(accountId: string, messageId: string) {
     },
   })
   if (!msg || msg.folder.specialUse !== '\\Inbox') return
+  await processMessage(accountId, cfg, msg)
+}
 
+// Simulação de lead (rota admin): roda o mesmo pipeline com uma mensagem sintética, sem tocar na caixa.
+// Nunca roda em `live` (a resposta iria para um remetente fictício) e não grava descadastro
+// (não polui a lista Do-Not-Email do cliente com endereço de teste).
+export class SimulationError extends Error {}
+
+export async function simulateIncoming(accountId: string, input: { fromEmail: string; subject: string; body: string }) {
+  if (process.env.AUTOREPLY_ENABLED !== 'true') throw new SimulationError('AUTOREPLY_ENABLED não está true no backend')
+  const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId } })
+  if (!cfg || cfg.mode === 'off') throw new SimulationError('Caixa sem agente ativo (modo off ou sem configuração)')
+  if (cfg.mode === 'live') throw new SimulationError('Simulação não é permitida em modo live: use shadow ou test')
+  if (cfg.mode === 'test' && !cfg.testRecipient) throw new SimulationError('Modo test sem testRecipient')
+  const account = await prisma.mailAccount.findUnique({ where: { id: accountId }, select: { userId: true, emailAddress: true } })
+  if (!account) throw new SimulationError('Conta não encontrada')
+
+  const id = `sim-${randomUUID()}`
+  await processMessage(accountId, cfg, {
+    id, date: new Date(), subject: input.subject, fromEmail: input.fromEmail, textBody: input.body, htmlBody: null,
+    messageId: null, folder: { account },
+  }, { simulated: true })
+  return prisma.autoReplyLog.findUnique({
+    where: { messageId: id },
+    select: { status: true, reason: true, draft: true, sentTo: true, attachment: true, fromEmail: true, threadKey: true },
+  })
+}
+
+async function processMessage(accountId: string, cfg: AgentConfig, msg: IncomingMessage, opts: { simulated?: boolean } = {}) {
+  const messageId = msg.id
   let fromEmail = (msg.fromEmail || '').toLowerCase()
   let subject = msg.subject || ''
   let body = msg.textBody || (msg.htmlBody ? stripHtml(msg.htmlBody) : '')
@@ -85,7 +128,7 @@ export async function onBodyReady(accountId: string, messageId: string) {
   // Descadastro vale para o cliente inteiro (todas as caixas que compartilham o conteúdo).
   const clientKey = cfg.knowledgeAccountId ?? accountId
   if (await isSuppressed(clientKey, fromEmail)) return finish('skipped', { reason: 'suppressed' })
-  if (looksLikeOptOut(body)) await suppress(clientKey, fromEmail, 'opt_out')
+  if (!opts.simulated && looksLikeOptOut(body)) await suppress(clientKey, fromEmail, 'opt_out')
 
   const since = new Date(Date.now() - THREAD_WINDOW_MS)
   const recent = await prisma.autoReplyLog.count({

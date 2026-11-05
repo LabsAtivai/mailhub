@@ -10,6 +10,7 @@ import { checkReadiness } from './readiness'
 import { listAssets, upsertAsset } from './assets'
 import { getAutoReplyOverview } from './overview'
 import { syncPendingSuppressions, listSnovAccounts } from './snov'
+import { simulateIncoming, SimulationError } from './agent'
 
 const log = scope('autoReply')
 const router = Router()
@@ -32,6 +33,12 @@ const SnovSchema = z.object({
 const DocumentSchema = z.object({
   source: z.string().min(1).max(200),
   text: z.string().min(1).max(500_000),
+})
+
+const SimulateSchema = z.object({
+  fromEmail: z.string().email(),
+  subject: z.string().min(1).max(500),
+  body: z.string().min(1).max(20_000),
 })
 
 const AssetSchema = z.object({
@@ -125,6 +132,20 @@ router.post('/admin/auto-reply/:accountId/knowledge', requireAdmin, async (req: 
     const chunks = await ingestDocument(account.id, parsed.data.source, parsed.data.text)
     res.json({ source: parsed.data.source, chunks })
   } catch (err) { fail(res, err) }
+})
+
+// POST /admin/auto-reply/:accountId/simulate — injeta um e-mail de lead fictício no agente da caixa.
+// Só em shadow/test (nunca live). Em test, a resposta vai para o testRecipient com [TESTE] no assunto.
+// Não grava descadastro. Devolve o registro do agente (status, motivo, rascunho).
+router.post('/admin/auto-reply/:accountId/simulate', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const parsed = SimulateSchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  try {
+    res.json(await simulateIncoming(req.params.accountId, parsed.data))
+  } catch (err) {
+    if (err instanceof SimulationError) { res.status(409).json({ error: err.message }); return }
+    fail(res, err)
+  }
 })
 
 // GET /admin/auto-reply/snov-accounts?q= — contas Snov do gerenciador de credenciais (sem segredos).
