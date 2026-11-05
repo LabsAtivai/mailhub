@@ -9,8 +9,7 @@ import { ingestDocument, knowledgeStats } from './knowledge'
 import { checkReadiness } from './readiness'
 import { listAssets, upsertAsset } from './assets'
 import { getAutoReplyOverview } from './overview'
-import { syncPendingSuppressions } from './snov'
-import { encrypt } from '../../lib/crypto'
+import { syncPendingSuppressions, listSnovAccounts } from './snov'
 
 const log = scope('autoReply')
 const router = Router()
@@ -26,8 +25,7 @@ const ConfigSchema = z.object({
 }).refine(v => v.mode !== 'test' || !!v.testRecipient, { message: 'testRecipient obrigatório no modo test' })
 
 const SnovSchema = z.object({
-  clientId: z.string().min(1).max(200),
-  clientSecret: z.string().min(1).max(500),
+  snovAccountId: z.string().min(1).max(100),
   listId: z.number().int().positive(),
 })
 
@@ -129,7 +127,12 @@ router.post('/admin/auto-reply/:accountId/knowledge', requireAdmin, async (req: 
   } catch (err) { fail(res, err) }
 })
 
-// PUT /admin/auto-reply/:accountId/snov — credenciais da API Snov.io do cliente (accountId = caixa dona).
+// GET /admin/auto-reply/snov-accounts?q= — contas Snov do gerenciador de credenciais (sem segredos).
+router.get('/admin/auto-reply/snov-accounts', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try { res.json(await listSnovAccounts(typeof req.query.q === 'string' ? req.query.q : undefined)) } catch (err) { fail(res, err) }
+})
+
+// PUT /admin/auto-reply/:accountId/snov — vincula o cliente à conta Snov.io dele (accountId = caixa dona).
 router.put('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRequest, res: Response) => {
   const parsed = SnovSchema.safeParse(req.body)
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
@@ -137,7 +140,7 @@ router.put('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRe
     const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId: req.params.accountId }, select: { knowledgeAccountId: true } })
     if (!cfg) { res.status(404).json({ error: 'Caixa sem configuração do agente' }); return }
     if (cfg.knowledgeAccountId) { res.status(400).json({ error: 'Cadastre o Snov na caixa dona do conteúdo, não numa filha' }); return }
-    const data = { clientIdEnc: encrypt(parsed.data.clientId), clientSecretEnc: encrypt(parsed.data.clientSecret), listId: parsed.data.listId }
+    const data = { snovAccountId: parsed.data.snovAccountId, listId: parsed.data.listId }
     await prisma.clientSnovConfig.upsert({ where: { clientKey: req.params.accountId }, create: { clientKey: req.params.accountId, ...data }, update: data })
     const synced = await syncPendingSuppressions(req.params.accountId)
     res.json({ ok: true, listId: parsed.data.listId, syncedPending: synced })

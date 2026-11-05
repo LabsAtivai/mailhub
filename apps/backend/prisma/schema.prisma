@@ -226,14 +226,14 @@ model AutoReplySuppression {
   @@index([snovSyncedAt])
 }
 
-// Credenciais da API do Snov.io de cada cliente (uma conta Snov por cliente).
-// clientKey = caixa dona do conteúdo. Segredos cifrados com AES-256-GCM (lib/crypto).
+// Liga o cliente à conta Snov.io dele no gerenciador de credenciais (snov-am-api).
+// O MailHub NÃO guarda segredo: busca client_id/secret no gerenciador quando precisa.
+// clientKey = caixa dona do conteúdo; snovAccountId = id da conta no gerenciador.
 model ClientSnovConfig {
-  clientKey       String   @id
-  clientIdEnc     String
-  clientSecretEnc String
-  listId          Int
-  updatedAt       DateTime @updatedAt
+  clientKey     String   @id
+  snovAccountId String
+  listId        Int
+  updatedAt     DateTime @updatedAt
 }
 
 // Um registro por mensagem recebida processada: o unique em messageId é o

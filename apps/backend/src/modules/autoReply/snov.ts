@@ -1,11 +1,38 @@
 import { prisma } from '../../lib/prisma'
-import { decrypt } from '../../lib/crypto'
 import { scope } from '../../lib/logger'
 
 const log = scope('autoReply.snov')
 const API = 'https://api.snov.io'
 const MAX_ATTEMPTS = 10
 const BATCH = 100 // limite do Snov por chamada
+
+// Gerenciador de credenciais (snov-am-api, rede docker ativaai). Chave com scope credentials:read.
+// Cada leitura de credencial é auditada lá, então só buscamos quando o token expira.
+async function fetchCredentials(snovAccountId: string): Promise<{ clientId: string; clientSecret: string }> {
+  const base = process.env.CREDENTIALS_API_URL
+  const key = process.env.CREDENTIALS_API_KEY
+  if (!base || !key) throw new Error('CREDENTIALS_API_URL/CREDENTIALS_API_KEY não configurados')
+  const r = await fetch(`${base.replace(/\/$/, '')}/api/internal/accounts/${encodeURIComponent(snovAccountId)}/credentials`, {
+    headers: { 'X-API-Key': key },
+  })
+  if (!r.ok) throw new Error(`credenciais ${r.status}`)
+  const j = await r.json() as { snov_id?: string; snov_secret?: string }
+  if (!j.snov_id || !j.snov_secret) throw new Error('conta sem snov_id/snov_secret no gerenciador')
+  return { clientId: j.snov_id, clientSecret: j.snov_secret }
+}
+
+export async function listSnovAccounts(q?: string): Promise<Array<{ id: string; email: string; status: string; description?: string | null }>> {
+  const base = process.env.CREDENTIALS_API_URL
+  const key = process.env.CREDENTIALS_API_KEY
+  if (!base || !key) throw new Error('CREDENTIALS_API_URL/CREDENTIALS_API_KEY não configurados')
+  const url = new URL(`${base.replace(/\/$/, '')}/api/accounts`)
+  url.searchParams.set('page_size', '100')
+  if (q) url.searchParams.set('q', q)
+  const r = await fetch(url, { headers: { 'X-API-Key': key } })
+  if (!r.ok) throw new Error(`contas ${r.status}`)
+  const j = await r.json() as { items?: Array<{ id: string; email: string; status: string; description?: string | null }> }
+  return (j.items ?? []).map(a => ({ id: a.id, email: a.email, status: a.status, description: a.description }))
+}
 
 const tokens = new Map<string, { token: string; expiresAt: number }>()
 
@@ -29,7 +56,11 @@ async function accessToken(clientKey: string, clientId: string, clientSecret: st
 async function pushBatch(clientKey: string, emails: string[]): Promise<{ rejected: Set<string> }> {
   const cfg = await prisma.clientSnovConfig.findUnique({ where: { clientKey } })
   if (!cfg) throw new Error('cliente sem credenciais Snov')
-  const token = await accessToken(clientKey, decrypt(cfg.clientIdEnc), decrypt(cfg.clientSecretEnc))
+  let token = tokens.get(clientKey)?.token
+  if (!token || (tokens.get(clientKey)?.expiresAt ?? 0) <= Date.now() + 60_000) {
+    const c = await fetchCredentials(cfg.snovAccountId)
+    token = await accessToken(clientKey, c.clientId, c.clientSecret)
+  }
   const r = await fetch(`${API}/v2/blacklists/${cfg.listId}/items`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
