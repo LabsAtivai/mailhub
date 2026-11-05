@@ -235,7 +235,8 @@ model AutoReplySuppression {
 model ClientSnovConfig {
   clientKey     String   @id
   snovAccountId String
-  listId        Int
+  // Todas as listas Do-Not-Email do cliente que devem receber o descadastro (1 ou mais).
+  listIds       Int[]
   updatedAt     DateTime @updatedAt
 }
 

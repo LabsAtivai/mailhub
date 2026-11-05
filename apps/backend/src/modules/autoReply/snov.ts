@@ -61,15 +61,24 @@ async function pushBatch(clientKey: string, emails: string[]): Promise<{ rejecte
     const c = await fetchCredentials(cfg.snovAccountId)
     token = await accessToken(clientKey, c.clientId, c.clientSecret)
   }
-  const r = await fetch(`${API}/v2/blacklists/${cfg.listId}/items`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ items: emails }),
-  })
-  if (r.status === 401) tokens.delete(clientKey)
-  if (!r.ok) throw new Error(`snov add ${r.status}`)
-  const j = await r.json() as { data?: { rejected?: Array<{ item?: string; value?: string }> } }
-  const rejected = new Set((j.data?.rejected ?? []).map(x => (x.item ?? x.value ?? '').toLowerCase()).filter(Boolean))
+  if (!cfg.listIds.length) throw new Error('cliente sem listas Do-Not-Email configuradas')
+  // Envia para todas as listas do cliente; se qualquer uma falhar, o lote inteiro fica pendente
+  // (reenviar é seguro: duplicado volta como "duplicates", não como erro).
+  const rejected = new Set<string>()
+  for (const listId of cfg.listIds) {
+    const r = await fetch(`${API}/v2/blacklists/${listId}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ items: emails }),
+    })
+    if (r.status === 401) tokens.delete(clientKey)
+    if (!r.ok) throw new Error(`snov add lista ${listId}: ${r.status}`)
+    const j = await r.json() as { data?: { rejected?: Array<{ item?: string; value?: string }> } }
+    for (const x of j.data?.rejected ?? []) {
+      const v = (x.item ?? x.value ?? '').toLowerCase()
+      if (v) rejected.add(v)
+    }
+  }
   return { rejected }
 }
 

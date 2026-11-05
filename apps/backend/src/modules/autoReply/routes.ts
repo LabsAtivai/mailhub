@@ -26,7 +26,7 @@ const ConfigSchema = z.object({
 
 const SnovSchema = z.object({
   snovAccountId: z.string().min(1).max(100),
-  listId: z.number().int().positive(),
+  listIds: z.array(z.number().int().positive()).min(1).max(10),
 })
 
 const DocumentSchema = z.object({
@@ -140,10 +140,10 @@ router.put('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRe
     const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId: req.params.accountId }, select: { knowledgeAccountId: true } })
     if (!cfg) { res.status(404).json({ error: 'Caixa sem configuração do agente' }); return }
     if (cfg.knowledgeAccountId) { res.status(400).json({ error: 'Cadastre o Snov na caixa dona do conteúdo, não numa filha' }); return }
-    const data = { snovAccountId: parsed.data.snovAccountId, listId: parsed.data.listId }
+    const data = { snovAccountId: parsed.data.snovAccountId, listIds: [...new Set(parsed.data.listIds)] }
     await prisma.clientSnovConfig.upsert({ where: { clientKey: req.params.accountId }, create: { clientKey: req.params.accountId, ...data }, update: data })
     const synced = await syncPendingSuppressions(req.params.accountId)
-    res.json({ ok: true, listId: parsed.data.listId, syncedPending: synced })
+    res.json({ ok: true, listIds: data.listIds, syncedPending: synced })
   } catch (err) { fail(res, err) }
 })
 
@@ -151,12 +151,12 @@ router.put('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRe
 router.get('/admin/auto-reply/:accountId/snov', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const key = req.params.accountId
-    const cfg = await prisma.clientSnovConfig.findUnique({ where: { clientKey: key }, select: { listId: true } })
+    const cfg = await prisma.clientSnovConfig.findUnique({ where: { clientKey: key }, select: { listIds: true } })
     const [pending, total] = await Promise.all([
       prisma.autoReplySuppression.count({ where: { clientKey: key, snovSyncedAt: null } }),
       prisma.autoReplySuppression.count({ where: { clientKey: key } }),
     ])
-    res.json({ configured: !!cfg, listId: cfg?.listId ?? null, suppressed: total, pendingSnovSync: pending })
+    res.json({ configured: !!cfg, listIds: cfg?.listIds ?? [], suppressed: total, pendingSnovSync: pending })
   } catch (err) { fail(res, err) }
 })
 
