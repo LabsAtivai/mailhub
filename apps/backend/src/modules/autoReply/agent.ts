@@ -169,7 +169,19 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
 
     const text = live
       ? draft
-      : `[TESTE] Esta resposta seria enviada para: ${fromEmail}\nAssunto original: ${subject}\n\n----------\n\n${draft}`
+      : [
+        `[TESTE] Esta resposta seria enviada para: ${fromEmail}`,
+        '',
+        '===== E-MAIL RECEBIDO =====',
+        `De: ${fromEmail}`,
+        `Assunto: ${subject}`,
+        '',
+        sanitizeEmailBody(body, 3000) || body.slice(0, 3000),
+        '',
+        '===== RESPOSTA DO AGENTE =====',
+        '',
+        draft,
+      ].join('\n')
     await messageUseCases.send(msg.folder.account.userId, {
       accountId,
       to: [to],
