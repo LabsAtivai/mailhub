@@ -529,12 +529,14 @@ setInterval(async () => {
   }
 }, 6 * 60 * 60 * 1000)
 
-// ── relatório diário de triagem (15h horário de Brasília) ──────────────────
+// ── relatório de triagem (9h, 14h e 16h horário de Brasília) ───────────────
 // Sem lib de cron (mesmo padrão dos outros schedulers deste arquivo): checa a
-// cada minuto se bateu 15:00 em America/Sao_Paulo. Lock no Redis (NX + expira
-// em 24h) evita mandar o relatório 2x se o worker reiniciar dentro da mesma
-// janela do minuto certo. Se a rodada falhar (ex: OpenAI fora do ar), não
-// tenta de novo no mesmo dia — próxima tentativa é 15:00 do dia seguinte.
+// cada minuto se bateu um dos horários de REPORT_TIMES em America/Sao_Paulo.
+// Lock no Redis por dia+horário (NX + expira em 24h) evita mandar o relatório
+// 2x se o worker reiniciar dentro da mesma janela do minuto certo. Se a
+// rodada falhar (ex: OpenAI fora do ar), não tenta de novo naquele horário —
+// a próxima tentativa é o próximo horário da lista. Cada rodada é acumulada
+// do dia (00:00 até o momento).
 function saoPauloNow(): { dateKey: string; hhmm: string } {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo', hour12: false,
@@ -544,11 +546,13 @@ function saoPauloNow(): { dateKey: string; hhmm: string } {
   return { dateKey: `${get('year')}-${get('month')}-${get('day')}`, hhmm: `${get('hour')}:${get('minute')}` }
 }
 
+const REPORT_TIMES = ['09:00', '14:00', '16:00']
+
 setInterval(async () => {
   const { dateKey, hhmm } = saoPauloNow()
-  if (hhmm !== '15:00') return
+  if (!REPORT_TIMES.includes(hhmm)) return
 
-  const lockKey = `mailhub:report:sent:${dateKey}`
+  const lockKey = `mailhub:report:sent:${dateKey}:${hhmm}`
   const acquired = await redis.set(lockKey, '1', 'EX', 24 * 60 * 60, 'NX')
   if (!acquired) return
 
