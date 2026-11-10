@@ -155,7 +155,7 @@ export async function approveReferral(logId: string, editedDraft?: string) {
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)
   const today = await prisma.autoReplyLog.count({
-    where: { accountId: row.accountId, createdAt: { gte: startOfDay }, status: { in: ['sent', 'test_sent', 'shadow', 'referral_sent'] } },
+    where: { accountId: row.accountId, createdAt: { gte: startOfDay }, status: { in: ['sent', 'referral_sent'] } }, // aprovação só ocorre em live: conta apenas envio real
   })
   if (today >= cfg.dailyLimit) throw new ReferralError('Teto diário da caixa atingido')
 

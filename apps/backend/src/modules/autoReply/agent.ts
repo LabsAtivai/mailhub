@@ -22,6 +22,13 @@ const log = scope('autoReply')
 const THREAD_WINDOW_MS = 24 * 60 * 60 * 1000
 const COUNTED = ['sent', 'test_sent', 'shadow', 'referral_pending', 'referral_sending', 'referral_sent']
 
+// O teto diário protege o que sai de verdade. Em live conta só envio real (e indicações em andamento);
+// rascunhos de shadow e e-mails de teste feitos antes ou durante o dia não podem consumir o teto do live.
+// Em shadow e test continua contando tudo, para limitar o volume de rascunhos e de e-mails de teste.
+export function dailyLimitStatuses(mode: string): string[] {
+  return mode === 'live' ? ['sent', 'referral_pending', 'referral_sending', 'referral_sent'] : COUNTED
+}
+
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -159,7 +166,7 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)
   const today = await prisma.autoReplyLog.count({
-    where: { accountId, createdAt: { gte: startOfDay }, status: { in: COUNTED } },
+    where: { accountId, createdAt: { gte: startOfDay }, status: { in: dailyLimitStatuses(cfg.mode) } },
   })
   if (today >= cfg.dailyLimit) return finish('skipped', { reason: 'daily_limit' })
 
