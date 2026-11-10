@@ -251,16 +251,18 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
     // afirmação sobre a empresa, então não passa por aqui. Se algo sem base sobrar (ou a verificação falhar),
     // em live a resposta NÃO é enviada: fica registrada como pulada, com o rascunho, para revisão.
     let groundFlag: string | undefined
+    let groundNote: string | undefined // rastro quando a verificação reescreveu o rascunho com sucesso
     if (!optOut) {
       const g = await groundDraft({ context: clientContext, received: `${subject}\n\n${sanitizeEmailBody(body, 4000) || body.slice(0, 4000)}`, draft })
       draft = g.draft
       if (g.unsupported.length) groundFlag = 'unsupported_claims'
       else if (!g.checked) groundFlag = 'verification_failed'
+      else if (g.rewritten) groundNote = 'grounded_rewrite'
     }
     if (groundFlag && cfg.mode === 'live') return finish('skipped', { reason: groundFlag, draft })
 
     const phoneFields = phoneReferral ? { referredPhone: phoneReferral.phone ?? undefined, referredName: phoneReferral.name ?? undefined } : {}
-    if (cfg.mode === 'shadow') return finish('shadow', { draft, reason: groundFlag, attachment: attachment?.filename, ...phoneFields })
+    if (cfg.mode === 'shadow') return finish('shadow', { draft, reason: groundFlag ?? groundNote, attachment: attachment?.filename, ...phoneFields })
 
     const live = cfg.mode === 'live'
     const recipients = live ? [fromEmail] : parseRecipients(cfg.testRecipient)
@@ -292,7 +294,7 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
       inReplyTo: live ? (msg.messageId ?? undefined) : undefined,
       attachments: attachment ? [attachment] : undefined,
     })
-    await finish(live ? 'sent' : 'test_sent', { draft, reason: groundFlag, sentTo: to, attachment: attachment?.filename, ...phoneFields })
+    await finish(live ? 'sent' : 'test_sent', { draft, reason: groundFlag ?? groundNote, sentTo: to, attachment: attachment?.filename, ...phoneFields })
     log.info({ accountId, messageId, mode: cfg.mode }, 'auto reply sent')
     // Telefone indicado sem e-mail: a equipe liga. Só em live (em teste o endereço é fictício) e nunca derruba a resposta.
     if (live && phoneReferral?.phone) {

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const gen = vi.fn()
 vi.mock('../../ai/openaiClient', () => ({ generateWithInstructions: (...a: unknown[]) => gen(...a) }))
 
-import { groundDraft, parseUnsupported } from '../grounding'
+import { groundDraft, parseUnsupported, quoteInContext } from '../grounding'
 
 const ctx = { context: 'A Avell fabrica notebooks de alto desempenho.', received: 'Vocês têm garantia estendida?', draft: 'Sim, temos garantia estendida.\n\nEduardo' }
 
@@ -46,5 +46,42 @@ describe('verificação de fatos do rascunho', () => {
     gen.mockRejectedValueOnce(new Error('timeout'))
     const r = await groundDraft(ctx)
     expect(r).toMatchObject({ checked: false, rewritten: false, draft: ctx.draft })
+  })
+})
+
+const CONTEXT = 'A Avell é uma marca brasileira especializada em notebooks de alto desempenho. Linha B.on: focada em produtividade, mobilidade e uso corporativo. CNPJ e e-mail do responsável financeiro omitidos de propósito.'
+
+describe('revisor com evidência literal', () => {
+  it('afirmação sem citação, ou com citação que não existe no contexto, é sem base', () => {
+    const raw = JSON.stringify({ afirmacoes: [
+      { afirmacao: 'vende para CNPJ com nota fiscal', evidencia: null },
+      { afirmacao: 'oferece garantia estendida', evidencia: 'A Avell oferece garantia estendida de 3 anos em todos os modelos' },
+      { afirmacao: 'marca brasileira de notebooks', evidencia: 'A Avell é uma marca brasileira especializada em notebooks de alto desempenho' },
+    ] })
+    expect(parseUnsupported(raw, CONTEXT)).toEqual(['vende para CNPJ com nota fiscal', 'oferece garantia estendida'])
+  })
+
+  it('a palavra CNPJ aparecendo em outro sentido não vale como evidência', () => {
+    const raw = JSON.stringify({ afirmacoes: [{ afirmacao: 'vendemos para CNPJ', evidencia: 'CNPJ e e-mail' }] })
+    expect(parseUnsupported(raw, CONTEXT)).toEqual(['vendemos para CNPJ'])
+  })
+
+  it('citação com acento ou pontuação diferente ainda é reconhecida', () => {
+    expect(quoteInContext('linha b.on focada em produtividade mobilidade e uso corporativo', 'x ' + CONTEXT.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' '))).toBe(true)
+    expect(quoteInContext('curta', 'curta demais')).toBe(false)
+  })
+
+  it('sem nenhuma afirmação factual, tudo sustentado', () => {
+    expect(parseUnsupported('{"afirmacoes": []}', CONTEXT)).toEqual([])
+  })
+
+  it('o fluxo completo usa a citação: sem evidência real o rascunho é reescrito', async () => {
+    gen.mockReset()
+    gen.mockResolvedValueOnce(JSON.stringify({ afirmacoes: [{ afirmacao: 'nota fiscal para CNPJ', evidencia: 'emitimos nota fiscal para CNPJ' }] }))
+      .mockResolvedValueOnce('Vou confirmar a nota fiscal com a equipe e retorno.')
+      .mockResolvedValueOnce(JSON.stringify({ afirmacoes: [] }))
+    const r = await groundDraft({ context: CONTEXT, received: 'Vendem para CNPJ?', draft: 'Sim, emitimos nota fiscal para CNPJ.' })
+    expect(r).toMatchObject({ unsupported: [], rewritten: true, checked: true })
+    expect(r.draft).toContain('Vou confirmar')
   })
 })
