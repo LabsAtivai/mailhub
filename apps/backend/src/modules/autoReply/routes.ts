@@ -11,6 +11,8 @@ import { listAssets, upsertAsset } from './assets'
 import { getAutoReplyOverview } from './overview'
 import { syncPendingSuppressions, listSnovAccounts } from './snov'
 import { simulateIncoming, SimulationError } from './agent'
+import { TestRecipientSchema } from './recipients'
+import { listReferrals, approveReferral, rejectReferral, ReferralError } from './referral'
 
 const log = scope('autoReply')
 const router = Router()
@@ -18,7 +20,7 @@ router.use(requireAuth)
 
 const ConfigSchema = z.object({
   mode: z.enum(['off', 'shadow', 'test', 'live']),
-  testRecipient: z.string().email().nullable().optional(),
+  testRecipient: TestRecipientSchema.nullable().optional(),
   clientName: z.string().max(200).optional(),
   signature: z.string().max(2000).optional(),
   dailyLimit: z.number().int().min(1).max(500).optional(),
@@ -201,6 +203,34 @@ router.post('/admin/auto-reply/:accountId/assets', requireAdmin, async (req: Aut
 
 router.get('/admin/auto-reply/:accountId/assets', requireAdmin, async (req: AuthRequest, res: Response) => {
   try { res.json(await listAssets(req.params.accountId)) } catch (err) { fail(res, err) }
+})
+
+// Indicações com e-mail: em live o agente só gera o rascunho (referral_pending); a pessoa aprova aqui.
+// GET /admin/auto-reply/referrals?status=referral_pending
+router.get('/admin/auto-reply/referrals', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const status = typeof req.query.status === 'string' && /^[a-z_]{3,40}$/.test(req.query.status) ? req.query.status : 'referral_pending'
+  try { res.json(await listReferrals(status)) } catch (err) { fail(res, err) }
+})
+
+// POST /admin/auto-reply/referrals/:logId/approve  { draft?: string }  — envia ao indicado, com quem indicou em cópia.
+router.post('/admin/auto-reply/referrals/:logId/approve', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const parsed = z.object({ draft: z.string().min(1).max(20_000).optional() }).safeParse(req.body ?? {})
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  try {
+    res.json(await approveReferral(req.params.logId, parsed.data.draft))
+  } catch (err) {
+    if (err instanceof ReferralError) { res.status(409).json({ error: err.message }); return }
+    fail(res, err)
+  }
+})
+
+router.post('/admin/auto-reply/referrals/:logId/reject', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    res.json(await rejectReferral(req.params.logId))
+  } catch (err) {
+    if (err instanceof ReferralError) { res.status(409).json({ error: err.message }); return }
+    fail(res, err)
+  }
 })
 
 export default router

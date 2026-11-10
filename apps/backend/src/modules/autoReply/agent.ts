@@ -9,12 +9,17 @@ import { sanitizeEmailBody, cleanupFinalEmail } from './sanitize'
 import { messageUseCases } from '../messages/useCases'
 import { searchKnowledge } from './knowledge'
 import { isSuppressed, suppress } from './suppression'
+import { parseRecipients } from './recipients'
+import { isNoiseMessage } from '../messages/noiseFilter'
+import { detectReferral, referralBlocked, findReferrer } from './referral'
+import { REFERRAL_INTRO_INSTRUCTIONS, buildReferralIntroPrompt } from './referralPrompt'
+import { appendPhoneReferral } from './sheets'
 import { isAutomatic, isSelf, isStale, looksLikeOptOut, threadKeyOf, unwrapForwarded, type SkipReason } from './filters'
 
 const log = scope('autoReply')
 
 const THREAD_WINDOW_MS = 24 * 60 * 60 * 1000
-const COUNTED = ['sent', 'test_sent', 'shadow']
+const COUNTED = ['sent', 'test_sent', 'shadow', 'referral_pending', 'referral_sending', 'referral_sent']
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -37,9 +42,10 @@ export async function onNewMessage(payload: { accountId: string; messageId: stri
   if (!(await getConfig(payload.accountId))) return
   const msg = await prisma.message.findUnique({
     where: { id: payload.messageId },
-    select: { folder: { select: { specialUse: true } }, textBody: true, htmlBody: true },
+    select: { folder: { select: { specialUse: true } }, textBody: true, htmlBody: true, subject: true, fromEmail: true },
   })
   if (!msg || msg.folder.specialUse !== '\\Inbox') return
+  if (isNoiseMessage(msg)) return // ruído (WRM etc.): nem busca o corpo
   if (msg.textBody || msg.htmlBody) return onBodyReady(payload.accountId, payload.messageId)
   await redis.publish('mailhub:fetch:body', JSON.stringify({ messageId: payload.messageId }))
 }
@@ -90,10 +96,15 @@ export async function simulateIncoming(accountId: string, input: { fromEmail: st
     id, date: new Date(), subject: input.subject, fromEmail: input.fromEmail, textBody: input.body, htmlBody: null,
     messageId: null, folder: { account },
   }, { simulated: true })
-  return prisma.autoReplyLog.findUnique({
+  const result = await prisma.autoReplyLog.findUnique({
     where: { messageId: id },
-    select: { status: true, reason: true, draft: true, sentTo: true, attachment: true, fromEmail: true, threadKey: true },
+    select: {
+      status: true, reason: true, draft: true, sentTo: true, attachment: true, fromEmail: true, threadKey: true,
+      referredEmail: true, referredName: true, referredPhone: true,
+    },
   })
+  if (!result) throw new SimulationError('Mensagem descartada como ruído (warmup WRM, resposta automática ou noreply): nada foi registrado')
+  return result
 }
 
 async function processMessage(accountId: string, cfg: AgentConfig, msg: IncomingMessage, opts: { simulated?: boolean } = {}) {
@@ -105,6 +116,11 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
   if (unwrapped) ({ fromEmail, subject, body } = unwrapped)
   const threadKey = threadKeyOf(subject)
 
+  // Ruído conhecido (warmup "(WRM)", resposta automática, noreply, bounce): descarta em
+  // silêncio, antes de qualquer registro. Não é classificado nem respondido e não aparece
+  // para os usuários, igual à listagem de e-mails.
+  if (isNoiseMessage({ subject: msg.subject, fromEmail: msg.fromEmail }) || isNoiseMessage({ subject, fromEmail })) return
+
   // Claim: o unique em messageId impede resposta dupla (mail:new e bodyReady
   // podem chegar os dois pra mesma mensagem).
   try {
@@ -114,7 +130,10 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
   } catch {
     return
   }
-  const finish = async (status: string, extra: { reason?: string; draft?: string; sentTo?: string; attachment?: string } = {}) => {
+  const finish = async (status: string, extra: {
+    reason?: string; draft?: string; sentTo?: string; attachment?: string
+    referredEmail?: string; referredName?: string; referredPhone?: string; subject?: string; inReplyTo?: string
+  } = {}) => {
     await prisma.autoReplyLog.update({ where: { messageId }, data: { status, ...extra } })
   }
 
@@ -145,12 +164,62 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
 
   try {
     const knowledge = await searchKnowledge(cfg.knowledgeAccountId ?? accountId, `${subject}\n\n${body}`.slice(0, 4000))
+    // Indicação: o remetente passou o contato de outra pessoa. Com e-mail, gera o rascunho de continuidade
+    // ao indicado (com o remetente em cópia); só com telefone, a resposta agradece e o contato vai para a planilha.
+    const optOut = looksLikeOptOut(body)
+    const referral = optOut ? null : await detectReferral({ subject, body, fromEmail, accountEmail: msg.folder.account.emailAddress })
+    const referralBlock = referral?.email ? await referralBlocked(clientKey, accountId, referral.email) : null
+    const emailReferral = referral?.email && !referralBlock ? referral : null
+    const phoneReferral = !emailReferral && referral?.phone ? referral : null
+    const referrer = await findReferrer(accountId, fromEmail)
+
     const clientContext = [
       `Empresa representada: ${cfg.clientName || 'o cliente'}.`,
-      looksLikeOptOut(body) ? 'ATENÇÃO: o remetente parece pedir remoção da lista — siga a regra de PEDIDO DE REMOÇÃO.' : '',
+      optOut ? 'ATENÇÃO: o remetente parece pedir remoção da lista — siga a regra de PEDIDO DE REMOÇÃO.' : '',
+      phoneReferral ? `INDICAÇÃO RECEBIDA: o remetente passou o telefone${phoneReferral.name ? ` de ${phoneReferral.name}` : ''} (${phoneReferral.phone}). Agradeça a indicação, diga que vamos entrar em contato com essa pessoa e não peça mais dados nem proponha reunião com o remetente.` : '',
+      referral?.email && referralBlock ? `INDICAÇÃO RECEBIDA: o contato indicado não pode ser abordado agora. Agradeça a indicação sem prometer contato com essa pessoa.` : '',
+      referrer ? `CONTINUIDADE: o remetente foi indicado por ${referrer.fromEmail}${referrer.subject ? ` (assunto "${referrer.subject}")` : ''} e já recebeu nosso e-mail de apresentação. Continue a conversa citando a indicação de forma natural, sem se reapresentar do zero.` : '',
       '',
       knowledge.length ? knowledge.join('\n\n---\n\n') : '[base de conhecimento vazia para este cliente]',
     ].filter(Boolean).join('\n')
+
+    if (emailReferral?.email) {
+      const intro = cleanupFinalEmail(await generateWithInstructions(
+        REFERRAL_INTRO_INSTRUCTIONS,
+        buildReferralIntroPrompt({
+          subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext,
+          senderEmail: fromEmail, senderName: emailReferral.senderName, referredName: emailReferral.name, referredEmail: emailReferral.email,
+        }),
+      ))
+      if (!intro.trim() || intro.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
+      const refFields = { referredEmail: emailReferral.email, referredName: emailReferral.name ?? undefined, subject, inReplyTo: msg.messageId ?? undefined }
+      if (cfg.mode === 'shadow') return finish('shadow', { draft: intro, reason: 'referral', ...refFields })
+      // Decisão do cliente: o e-mail ao indicado é primeiro contato, então em live só sai depois de aprovação humana.
+      if (cfg.mode === 'live') return finish('referral_pending', { draft: intro, ...refFields })
+
+      const testTo = parseRecipients(cfg.testRecipient)
+      if (!testTo.length) return finish('error', { reason: 'testRecipient ausente', draft: intro })
+      const testText = [
+        `[TESTE] Indicação detectada. Depois de aprovado, este e-mail seria enviado para: ${emailReferral.email}`,
+        `Com cópia para quem indicou: ${fromEmail}`,
+        `Assunto: ${/^re:/i.test(subject) ? subject : `Re: ${subject}`}`,
+        '',
+        '===== E-MAIL RECEBIDO =====',
+        `De: ${fromEmail}`,
+        `Assunto: ${subject}`,
+        '',
+        sanitizeEmailBody(body, 3000) || body.slice(0, 3000),
+        '',
+        '===== E-MAIL AO INDICADO (rascunho) =====',
+        '',
+        intro,
+      ].join('\n')
+      await messageUseCases.send(msg.folder.account.userId, {
+        accountId, to: testTo, subject: `[TESTE] Indicação: Re: ${subject}`,
+        text: testText, html: `<div style="white-space:pre-wrap">${escapeHtml(testText)}</div>`,
+      })
+      return finish('test_sent', { draft: intro, sentTo: testTo.join(', '), reason: 'referral', ...refFields })
+    }
 
     const presentation = await getAssetMeta(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND)
     const raw = await generateWithInstructions(
@@ -161,16 +230,19 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
     const draft = cleanupFinalEmail(flagged.text)
     const attachment = presentation && flagged.attach ? await getAssetAttachment(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND) : null
     if (draft.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
-    if (cfg.mode === 'shadow') return finish('shadow', { draft, attachment: attachment?.filename })
+    const phoneFields = phoneReferral ? { referredPhone: phoneReferral.phone ?? undefined, referredName: phoneReferral.name ?? undefined } : {}
+    if (cfg.mode === 'shadow') return finish('shadow', { draft, attachment: attachment?.filename, ...phoneFields })
 
     const live = cfg.mode === 'live'
-    const to = live ? fromEmail : cfg.testRecipient
-    if (!to) return finish('error', { reason: 'testRecipient ausente', draft })
+    const recipients = live ? [fromEmail] : parseRecipients(cfg.testRecipient)
+    if (!recipients.length) return finish('error', { reason: 'testRecipient ausente', draft })
+    const to = recipients.join(', ')
 
     const text = live
       ? draft
       : [
         `[TESTE] Esta resposta seria enviada para: ${fromEmail}`,
+        ...(phoneReferral ? [`[PLANILHA] Seria registrado: ${phoneReferral.name || '(sem nome)'} | ${phoneReferral.phone} | indicado por ${fromEmail}`] : []),
         '',
         '===== E-MAIL RECEBIDO =====',
         `De: ${fromEmail}`,
@@ -184,15 +256,22 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
       ].join('\n')
     await messageUseCases.send(msg.folder.account.userId, {
       accountId,
-      to: [to],
+      to: recipients,
       subject: live ? (/^re:/i.test(subject) ? subject : `Re: ${subject}`) : `[TESTE] Re: ${subject}`,
       text,
       html: `<div style="white-space:pre-wrap">${escapeHtml(text)}</div>`,
       inReplyTo: live ? (msg.messageId ?? undefined) : undefined,
       attachments: attachment ? [attachment] : undefined,
     })
-    await finish(live ? 'sent' : 'test_sent', { draft, sentTo: to, attachment: attachment?.filename })
+    await finish(live ? 'sent' : 'test_sent', { draft, sentTo: to, attachment: attachment?.filename, ...phoneFields })
     log.info({ accountId, messageId, mode: cfg.mode }, 'auto reply sent')
+    // Telefone indicado sem e-mail: a equipe liga. Só em live (em teste o endereço é fictício) e nunca derruba a resposta.
+    if (live && phoneReferral?.phone) {
+      await appendPhoneReferral({
+        date: new Date(), client: cfg.clientName || '', mailbox: msg.folder.account.emailAddress, referrer: fromEmail,
+        subject, name: phoneReferral.name || '', phone: phoneReferral.phone, mode: 'live',
+      })
+    }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
     log.error({ accountId, messageId, reason }, 'auto reply failed')

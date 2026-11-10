@@ -33,6 +33,18 @@ const NOISE_TO_CONTAINS = [
   'coopercarga.ativa+track@gmail.com',
 ]
 
+// Mesma regra de excludeNoiseWhere, para uma mensagem já carregada. O respondedor
+// usa isto para descartar o ruído em silêncio: não classifica, não responde e não
+// registra nada que apareça para os usuários (log, métricas, visão geral).
+export function isNoiseMessage(m: { subject?: string | null; fromEmail?: string | null; toJson?: string | null }): boolean {
+  const subject = (m.subject ?? '').toLowerCase()
+  const from = (m.fromEmail ?? '').toLowerCase()
+  const to = (m.toJson ?? '').toLowerCase()
+  return NOISE_SUBJECT_CONTAINS.some(s => subject.includes(s.toLowerCase()))
+    || NOISE_FROM_CONTAINS.some(s => from.includes(s.toLowerCase()))
+    || NOISE_TO_CONTAINS.some(s => to.includes(s.toLowerCase()))
+}
+
 export function excludeNoiseWhere(): Record<string, unknown> {
   return {
     AND: [

@@ -250,11 +250,20 @@ model AutoReplyLog {
   draft      String?
   sentTo     String?
   attachment String?
+  // Indicação: o remetente passou o contato de outra pessoa (modules/autoReply/referral.ts).
+  // Com e-mail, gera-se um rascunho de continuidade (status referral_pending) que uma pessoa
+  // aprova; só com telefone, a resposta agradece e o contato vai para a planilha.
+  referredEmail String?
+  referredName  String?
+  referredPhone String?
+  subject       String?
+  inReplyTo     String?
   createdAt  DateTime    @default(now())
   account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([accountId, createdAt])
   @@index([accountId, fromEmail, threadKey, createdAt])
+  @@index([accountId, referredEmail])
 }
 
 // Base de conhecimento do respondedor automático (modules/autoReply/knowledge.ts).
