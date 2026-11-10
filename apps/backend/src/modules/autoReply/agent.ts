@@ -14,6 +14,7 @@ import { isNoiseMessage } from '../messages/noiseFilter'
 import { detectReferral, referralBlocked, findReferrer } from './referral'
 import { REFERRAL_INTRO_INSTRUCTIONS, buildReferralIntroPrompt } from './referralPrompt'
 import { appendPhoneReferral } from './sheets'
+import { detectLanguage } from './language'
 import { isAutomatic, isSelf, isStale, looksLikeOptOut, threadKeyOf, unwrapForwarded, type SkipReason } from './filters'
 
 const log = scope('autoReply')
@@ -172,12 +173,15 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
     const emailReferral = referral?.email && !referralBlock ? referral : null
     const phoneReferral = !emailReferral && referral?.phone ? referral : null
     const referrer = await findReferrer(accountId, fromEmail)
+    // Idioma detectado em código e passado explícito no pedido: o modelo, sozinho, volta ao português.
+    const language = detectLanguage(`${subject}\n${body}`)
 
     const clientContext = [
       `Empresa representada: ${cfg.clientName || 'o cliente'}.`,
       optOut ? 'ATENÇÃO: o remetente parece pedir remoção da lista — siga a regra de PEDIDO DE REMOÇÃO.' : '',
       phoneReferral ? `INDICAÇÃO RECEBIDA: o remetente passou o telefone${phoneReferral.name ? ` de ${phoneReferral.name}` : ''} (${phoneReferral.phone}). Agradeça a indicação, diga que vamos entrar em contato com essa pessoa e não peça mais dados nem proponha reunião com o remetente.` : '',
-      referral?.email && referralBlock ? `INDICAÇÃO RECEBIDA: o contato indicado não pode ser abordado agora. Agradeça a indicação sem prometer contato com essa pessoa.` : '',
+      referral?.email && referralBlock === 'recent' ? 'INDICAÇÃO RECEBIDA: essa pessoa indicada já foi contatada por nós recentemente. Agradeça a indicação e diga que a conversa segue com ela. Não peça o contato de novo, não prometa um novo contato e não faça pitch comercial ao remetente.' : '',
+      referral?.email && referralBlock === 'suppressed' ? 'INDICAÇÃO RECEBIDA: a pessoa indicada não pode ser abordada. Apenas agradeça a indicação, em uma ou duas frases, sem prometer contato com ela e sem citar o motivo.' : '',
       referrer ? `CONTINUIDADE: o remetente foi indicado por ${referrer.fromEmail}${referrer.subject ? ` (assunto "${referrer.subject}")` : ''} e já recebeu nosso e-mail de apresentação. Continue a conversa citando a indicação de forma natural, sem se reapresentar do zero.` : '',
       '',
       knowledge.length ? knowledge.join('\n\n---\n\n') : '[base de conhecimento vazia para este cliente]',
@@ -188,7 +192,7 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
         REFERRAL_INTRO_INSTRUCTIONS,
         buildReferralIntroPrompt({
           subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext,
-          senderEmail: fromEmail, senderName: emailReferral.senderName, referredName: emailReferral.name, referredEmail: emailReferral.email,
+          senderEmail: fromEmail, senderName: emailReferral.senderName, referredName: emailReferral.name, referredEmail: emailReferral.email, language,
         }),
       ))
       if (!intro.trim() || intro.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
@@ -224,7 +228,7 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
     const presentation = await getAssetMeta(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND)
     const raw = await generateWithInstructions(
       AGENT_SYSTEM_INSTRUCTIONS,
-      buildAgentPrompt({ subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext, attachmentName: presentation?.filename }),
+      buildAgentPrompt({ subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext, attachmentName: presentation?.filename, language }),
     )
     const flagged = extractAttachFlag(raw)
     const draft = cleanupFinalEmail(flagged.text)

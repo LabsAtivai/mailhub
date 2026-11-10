@@ -1,4 +1,5 @@
 import { brasiliaPromptContext } from '../../lib/brazilCalendar'
+import { languageDirective, type Lang } from './language'
 
 // Mesmo padrão de resposta do painel AtivaWriter (ativawriter-panel/server/openaiClient.js):
 // hierarquia CONTEXTO DO CLIENTE > respostas anteriores, PERSUASÃO COMERCIAL, CTA sem
@@ -113,10 +114,12 @@ export function extractAttachFlag(text: string): { text: string; attach: boolean
   return { text: text.split(ATTACH_PRESENTATION_TOKEN).join('').replace(/\n{3,}/g, '\n\n').trim(), attach }
 }
 
-export function buildAgentPrompt(input: { subject: string; body: string; signature: string; clientContext: string; attachmentName?: string | null }): string {
+export function buildAgentPrompt(input: { subject: string; body: string; signature: string; clientContext: string; attachmentName?: string | null; language?: Lang }): string {
   return `
 ### DATA E HORA ATUAL (Brasília)
 ${brasiliaPromptContext()}
+
+${languageDirective(input.language ?? 'unknown')}
 
 ### ASSINATURA
 Use esta assinatura real ao final da resposta, se estiver disponível. Nunca invente placeholders.

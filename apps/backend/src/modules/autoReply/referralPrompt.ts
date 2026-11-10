@@ -1,4 +1,5 @@
 import { brasiliaPromptContext } from '../../lib/brazilCalendar'
+import { languageDirective, type Lang } from './language'
 
 // Detecção de indicação: o modelo só devolve JSON; o código valida tudo depois
 // (e-mail e telefone precisam aparecer literalmente no texto recebido).
@@ -54,10 +55,13 @@ export function buildReferralIntroPrompt(input: {
   senderName?: string | null
   referredName?: string | null
   referredEmail: string
+  language?: Lang
 }): string {
   return `
 ### DATA E HORA ATUAL (Brasília)
 ${brasiliaPromptContext()}
+
+${languageDirective(input.language ?? 'unknown')}
 
 ### ASSINATURA
 ${input.signature || '[não informada]'}
