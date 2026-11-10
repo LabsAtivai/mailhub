@@ -15,6 +15,7 @@ import { detectReferral, referralBlocked, findReferrer } from './referral'
 import { REFERRAL_INTRO_INSTRUCTIONS, buildReferralIntroPrompt } from './referralPrompt'
 import { appendPhoneReferral } from './sheets'
 import { detectLanguage } from './language'
+import { groundDraft } from './grounding'
 import { isAutomatic, isSelf, isStale, looksLikeOptOut, threadKeyOf, unwrapForwarded, type SkipReason } from './filters'
 
 const log = scope('autoReply')
@@ -195,18 +196,22 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
     ].filter(Boolean).join('\n')
 
     if (emailReferral?.email) {
-      const intro = cleanupFinalEmail(await generateWithInstructions(
+      const rawIntro = cleanupFinalEmail(await generateWithInstructions(
         REFERRAL_INTRO_INSTRUCTIONS,
         buildReferralIntroPrompt({
           subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext,
           senderEmail: fromEmail, senderName: emailReferral.senderName, referredName: emailReferral.name, referredEmail: emailReferral.email, language,
         }),
       ))
-      if (!intro.trim() || intro.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
+      if (!rawIntro.trim() || rawIntro.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
+      // Mesma verificação de fatos da resposta normal. Aqui um humano aprova antes de sair, então só sinaliza.
+      const gi = await groundDraft({ context: clientContext, received: `${subject}\n\n${sanitizeEmailBody(body, 4000) || body.slice(0, 4000)}`, draft: rawIntro })
+      const intro = gi.draft
+      const introFlag = gi.unsupported.length ? 'unsupported_claims' : (!gi.checked ? 'verification_failed' : undefined)
       const refFields = { referredEmail: emailReferral.email, referredName: emailReferral.name ?? undefined, subject, inReplyTo: msg.messageId ?? undefined }
-      if (cfg.mode === 'shadow') return finish('shadow', { draft: intro, reason: 'referral', ...refFields })
+      if (cfg.mode === 'shadow') return finish('shadow', { draft: intro, reason: introFlag ? `referral:${introFlag}` : 'referral', ...refFields })
       // Decisão do cliente: o e-mail ao indicado é primeiro contato, então em live só sai depois de aprovação humana.
-      if (cfg.mode === 'live') return finish('referral_pending', { draft: intro, ...refFields })
+      if (cfg.mode === 'live') return finish('referral_pending', { draft: intro, reason: introFlag, ...refFields })
 
       const testTo = parseRecipients(cfg.testRecipient)
       if (!testTo.length) return finish('error', { reason: 'testRecipient ausente', draft: intro })
@@ -229,7 +234,7 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
         accountId, to: testTo, subject: `[TESTE] Indicação: Re: ${subject}`,
         text: testText, html: `<div style="white-space:pre-wrap">${escapeHtml(testText)}</div>`,
       })
-      return finish('test_sent', { draft: intro, sentTo: testTo.join(', '), reason: 'referral', ...refFields })
+      return finish('test_sent', { draft: intro, sentTo: testTo.join(', '), reason: introFlag ? `referral:${introFlag}` : 'referral', ...refFields })
     }
 
     const presentation = await getAssetMeta(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND)
@@ -238,11 +243,24 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
       buildAgentPrompt({ subject, body: sanitizeEmailBody(body, 12000) || body.slice(0, 12000), signature: cfg.signature, clientContext, attachmentName: presentation?.filename, language }),
     )
     const flagged = extractAttachFlag(raw)
-    const draft = cleanupFinalEmail(flagged.text)
+    let draft = cleanupFinalEmail(flagged.text)
     const attachment = presentation && flagged.attach ? await getAssetAttachment(cfg.knowledgeAccountId ?? accountId, PRESENTATION_KIND) : null
     if (draft.includes(NO_REPLY_TOKEN)) return finish('skipped', { reason: 'no_reply_needed' })
+
+    // Verificação de fatos: o que não está no material do cliente sai do rascunho. Pedido de remoção não tem
+    // afirmação sobre a empresa, então não passa por aqui. Se algo sem base sobrar (ou a verificação falhar),
+    // em live a resposta NÃO é enviada: fica registrada como pulada, com o rascunho, para revisão.
+    let groundFlag: string | undefined
+    if (!optOut) {
+      const g = await groundDraft({ context: clientContext, received: `${subject}\n\n${sanitizeEmailBody(body, 4000) || body.slice(0, 4000)}`, draft })
+      draft = g.draft
+      if (g.unsupported.length) groundFlag = 'unsupported_claims'
+      else if (!g.checked) groundFlag = 'verification_failed'
+    }
+    if (groundFlag && cfg.mode === 'live') return finish('skipped', { reason: groundFlag, draft })
+
     const phoneFields = phoneReferral ? { referredPhone: phoneReferral.phone ?? undefined, referredName: phoneReferral.name ?? undefined } : {}
-    if (cfg.mode === 'shadow') return finish('shadow', { draft, attachment: attachment?.filename, ...phoneFields })
+    if (cfg.mode === 'shadow') return finish('shadow', { draft, reason: groundFlag, attachment: attachment?.filename, ...phoneFields })
 
     const live = cfg.mode === 'live'
     const recipients = live ? [fromEmail] : parseRecipients(cfg.testRecipient)
@@ -274,7 +292,7 @@ async function processMessage(accountId: string, cfg: AgentConfig, msg: Incoming
       inReplyTo: live ? (msg.messageId ?? undefined) : undefined,
       attachments: attachment ? [attachment] : undefined,
     })
-    await finish(live ? 'sent' : 'test_sent', { draft, sentTo: to, attachment: attachment?.filename, ...phoneFields })
+    await finish(live ? 'sent' : 'test_sent', { draft, reason: groundFlag, sentTo: to, attachment: attachment?.filename, ...phoneFields })
     log.info({ accountId, messageId, mode: cfg.mode }, 'auto reply sent')
     // Telefone indicado sem e-mail: a equipe liga. Só em live (em teste o endereço é fictício) e nunca derruba a resposta.
     if (live && phoneReferral?.phone) {
