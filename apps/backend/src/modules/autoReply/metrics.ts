@@ -22,10 +22,12 @@ export interface AutoReplyMetrics {
 }
 
 export async function getAutoReplyMetrics(accountId: string, days: number): Promise<AutoReplyMetrics> {
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId }, select: { mode: true, metricsSince: true } })
+  // Janela pedida, mas nunca antes do início do live/reset: dados de shadow e teste ficam fora.
+  const window = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const since = cfg?.metricsSince && cfg.metricsSince > window ? cfg.metricsSince : window
 
-  const [cfg, grouped, skippedRows, interestedRows, repliedRows, leadRows, recent] = await Promise.all([
-    prisma.autoReplyConfig.findUnique({ where: { accountId }, select: { mode: true } }),
+  const [grouped, skippedRows, interestedRows, repliedRows, leadRows, recent] = await Promise.all([
     prisma.autoReplyLog.groupBy({
       by: ['status'], where: { accountId, createdAt: { gte: since } }, _count: { _all: true },
     }),
@@ -57,7 +59,7 @@ export async function getAutoReplyMetrics(accountId: string, days: number): Prom
       _count: { _all: true },
     }),
     prisma.autoReplyLog.findMany({
-      where: { accountId, status: { not: 'processing' } },
+      where: { accountId, createdAt: { gte: since }, status: { not: 'processing' } },
       orderBy: { createdAt: 'desc' }, take: 20,
       select: { id: true, createdAt: true, fromEmail: true, status: true, reason: true, draft: true, attachment: true },
     }),

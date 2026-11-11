@@ -208,6 +208,9 @@ model AutoReplyConfig {
   // Um cliente pode ter N caixas com o mesmo conteúdo: as caixas extras apontam aqui
   // para a caixa "dona" da base de conhecimento e dos anexos. Null = usa a própria.
   knowledgeAccountId String?
+  // Início da contagem do painel de métricas. Gravado quando a caixa entra em live
+  // (ou por reset manual), para os dados de shadow/teste não entrarem nas métricas.
+  metricsSince  DateTime?
   updatedAt     DateTime    @updatedAt
   account       MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 }

@@ -117,9 +117,26 @@ router.put('/admin/auto-reply/:accountId', requireAdmin, async (req: AuthRequest
       const readiness = await checkReadiness(account.id)
       if (!readiness.ok) { res.status(409).json({ error: 'Caixa não está pronta para o modo live', readiness }); return }
     }
-    const data = { ...parsed.data, testRecipient: parsed.data.testRecipient ?? null, knowledgeAccountId: parsed.data.knowledgeAccountId ?? null }
+    const prev = await prisma.autoReplyConfig.findUnique({ where: { accountId: account.id }, select: { mode: true } })
+    const enteringLive = parsed.data.mode === 'live' && prev?.mode !== 'live'
+    const data = {
+      ...parsed.data, testRecipient: parsed.data.testRecipient ?? null, knowledgeAccountId: parsed.data.knowledgeAccountId ?? null,
+      ...(enteringLive ? { metricsSince: new Date() } : {}),
+    }
     res.json(await prisma.autoReplyConfig.upsert({
       where: { accountId: account.id }, create: { accountId: account.id, ...data }, update: data,
+    }))
+  } catch (err) { fail(res, err) }
+})
+
+// POST /admin/auto-reply/:accountId/metrics/reset — zera o painel de métricas a partir de agora.
+// Não apaga o log: readiness, trava de 24h por thread e indicações continuam usando o histórico.
+router.post('/admin/auto-reply/:accountId/metrics/reset', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const cfg = await prisma.autoReplyConfig.findUnique({ where: { accountId: req.params.accountId }, select: { accountId: true } })
+    if (!cfg) { res.status(404).json({ error: 'Caixa sem configuração do agente' }); return }
+    res.json(await prisma.autoReplyConfig.update({
+      where: { accountId: cfg.accountId }, data: { metricsSince: new Date() }, select: { accountId: true, mode: true, metricsSince: true },
     }))
   } catch (err) { fail(res, err) }
 })
